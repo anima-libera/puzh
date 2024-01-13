@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::event::{self, EventHandler};
 use ggez::glam::IVec2;
@@ -6,6 +8,16 @@ use ggez::input::keyboard::KeyInput;
 use ggez::mint::Point2;
 use ggez::winit::event::VirtualKeyCode;
 use ggez::{Context, ContextBuilder, GameResult};
+
+fn tile_rect(coords: Point2<i32>) -> Rect {
+	let window_x = coords.x * 80;
+	let window_y = coords.y * 80;
+	Rect::new(window_x as f32, window_y as f32, 80.0 / 8.0, 80.0 / 8.0)
+}
+
+fn lerp(progress: f32, start: f32, end: f32) -> f32 {
+	start + progress * (end - start)
+}
 
 #[derive(Clone, Copy)]
 enum Sprite {
@@ -32,13 +44,23 @@ impl Sprite {
 	}
 }
 
-fn draw_sprite(sprite: Sprite, dst: Rect, canvas: &mut Canvas, spritesheet: &Image) {
+fn draw_sprite(sprite: Sprite, dst: Rect, z: i32, canvas: &mut Canvas, spritesheet: &Image) {
 	canvas.draw(
 		spritesheet,
 		DrawParam::default()
 			.dest_rect(dst)
-			.src(sprite.rect_in_spritesheet()),
+			.src(sprite.rect_in_spritesheet())
+			.z(z),
 	);
+}
+
+enum Animation {
+	None,
+	CommingFrom {
+		src: Point2<i32>,
+		time_start: Instant,
+		duration: Duration,
+	},
 }
 
 enum ObjKind {
@@ -51,9 +73,14 @@ struct Obj {
 	kind: ObjKind,
 	processed: bool,
 	moved: bool,
+	animation: Animation,
 }
 
 impl Obj {
+	fn from_kind(kind: ObjKind) -> Obj {
+		Obj { kind, processed: false, moved: false, animation: Animation::None }
+	}
+
 	fn can_move(&self) -> bool {
 		match self.kind {
 			ObjKind::Player => true,
@@ -117,14 +144,10 @@ struct Game {
 impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
 		let mut grid = Grid::new();
-		grid.get_mut(Point2::from([3, 5])).unwrap().obj =
-			Some(Obj { kind: ObjKind::Player, processed: false, moved: false });
-		grid.get_mut(Point2::from([5, 5])).unwrap().obj =
-			Some(Obj { kind: ObjKind::Rock, processed: false, moved: false });
-		grid.get_mut(Point2::from([5, 4])).unwrap().obj =
-			Some(Obj { kind: ObjKind::Rock, processed: false, moved: false });
-		grid.get_mut(Point2::from([2, 2])).unwrap().obj =
-			Some(Obj { kind: ObjKind::Wall, processed: false, moved: false });
+		grid.get_mut(Point2::from([3, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
+		grid.get_mut(Point2::from([5, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
+		grid.get_mut(Point2::from([5, 4])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
+		grid.get_mut(Point2::from([2, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Wall));
 		Ok(Game {
 			grid,
 			spritesheet: Image::from_bytes(ctx, include_bytes!("../assets/spritesheet.png"))?,
@@ -142,6 +165,13 @@ impl Game {
 		for tile in self.grid.tiles.iter_mut() {
 			if let Some(obj) = &mut tile.obj {
 				obj.moved = false;
+			}
+		}
+	}
+	fn clear_animations(&mut self) {
+		for tile in self.grid.tiles.iter_mut() {
+			if let Some(obj) = &mut tile.obj {
+				obj.animation = Animation::None;
 			}
 		}
 	}
@@ -168,6 +198,11 @@ impl Game {
 		if shall_move {
 			let mut obj = self.grid.get_mut(coords).unwrap().obj.take();
 			obj.as_mut().unwrap().moved = true;
+			obj.as_mut().unwrap().animation = Animation::CommingFrom {
+				src: coords,
+				time_start: Instant::now(),
+				duration: Duration::from_secs_f32(0.05),
+			};
 			self.grid.get_mut(coords_dst.into()).unwrap().obj = obj;
 		}
 	}
@@ -175,6 +210,7 @@ impl Game {
 	fn player_move(&mut self, direction: IVec2) {
 		self.clear_processed_flags();
 		self.clear_moved_flags();
+		self.clear_animations();
 
 		for grid_y in 0..Grid::H {
 			for grid_x in 0..Grid::W {
@@ -221,11 +257,12 @@ impl EventHandler for Game {
 
 		for grid_y in 0..Grid::H {
 			for grid_x in 0..Grid::W {
-				let window_x = grid_x * 80;
-				let window_y = grid_y * 80;
+				let coords = Point2::from([grid_x, grid_y]);
+
 				draw_sprite(
 					Sprite::Grass,
-					Rect::new(window_x as f32, window_y as f32, 80.0 / 8.0, 80.0 / 8.0),
+					tile_rect(coords),
+					1,
 					&mut canvas,
 					&self.spritesheet,
 				);
@@ -236,12 +273,19 @@ impl EventHandler for Game {
 						ObjKind::Rock => Sprite::Rock,
 						ObjKind::Wall => Sprite::Wall,
 					};
-					draw_sprite(
-						sprite,
-						Rect::new(window_x as f32, window_y as f32, 80.0 / 8.0, 80.0 / 8.0),
-						&mut canvas,
-						&self.spritesheet,
-					);
+					let rect = match obj.animation {
+						Animation::None => tile_rect(coords),
+						Animation::CommingFrom { src, time_start, duration } => {
+							let dst_rect = tile_rect(coords);
+							let src_rect = tile_rect(src);
+							let progress = time_start.elapsed().as_secs_f32() / duration.as_secs_f32();
+							let progress = progress.clamp(0.0, 1.0);
+							let window_x = lerp(progress, src_rect.x, dst_rect.x);
+							let window_y = lerp(progress, src_rect.y, dst_rect.y);
+							Rect::new(window_x, window_y, dst_rect.w, dst_rect.h)
+						},
+					};
+					draw_sprite(sprite, rect, 2, &mut canvas, &self.spritesheet);
 				}
 			}
 		}

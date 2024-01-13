@@ -28,6 +28,7 @@ enum Sprite {
 	Grass,
 	Rock,
 	Wall,
+	Rope,
 }
 
 impl Sprite {
@@ -37,6 +38,7 @@ impl Sprite {
 			Sprite::Grass => (1, 1),
 			Sprite::Rock => (3, 0),
 			Sprite::Wall => (2, 0),
+			Sprite::Rope => (4, 0),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -75,6 +77,7 @@ enum ObjKind {
 	Player,
 	Rock,
 	Wall,
+	Rope,
 }
 
 struct Obj {
@@ -94,6 +97,7 @@ impl Obj {
 			ObjKind::Player => true,
 			ObjKind::Rock => true,
 			ObjKind::Wall => false,
+			ObjKind::Rope => true,
 		}
 	}
 }
@@ -156,8 +160,11 @@ impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
 		let mut grid = Grid::new();
 		grid.get_mut(Point2::from([3, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
-		grid.get_mut(Point2::from([5, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
+		grid.get_mut(Point2::from([2, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
 		grid.get_mut(Point2::from([5, 4])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
+		grid.get_mut(Point2::from([5, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
+		grid.get_mut(Point2::from([5, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
+		grid.get_mut(Point2::from([5, 7])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
 		grid.get_mut(Point2::from([2, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Wall));
 		Ok(Game {
 			grid,
@@ -187,7 +194,7 @@ impl Game {
 		}
 	}
 
-	fn obj_move(&mut self, coords: Point2<i32>, direction: IVec2) {
+	fn obj_move(&mut self, coords: Point2<i32>, direction: IVec2, pushed: bool) {
 		let coords_dst = IVec2::from(coords) + direction;
 		let mut shall_move = false;
 		let mut failed_to_move = false;
@@ -196,7 +203,7 @@ impl Game {
 				if obj.can_move() {
 					if let Some(tile_dst) = self.grid.get(coords_dst.into()) {
 						if tile_dst.obj.is_some() {
-							self.obj_move(coords_dst.into(), direction);
+							self.obj_move(coords_dst.into(), direction, true);
 						}
 					}
 					if let Some(tile_dst) = self.grid.get(coords_dst.into()) {
@@ -209,6 +216,8 @@ impl Game {
 				}
 			}
 		}
+
+		let mut obj_is_rope = false;
 		if shall_move {
 			let mut obj = self.grid.get_mut(coords).unwrap().obj.take();
 			obj.as_mut().unwrap().moved = true;
@@ -217,6 +226,7 @@ impl Game {
 				time_start: Instant::now(),
 				duration: Duration::from_secs_f32(0.05),
 			};
+			obj_is_rope = matches!(obj.as_mut().unwrap().kind, ObjKind::Rope);
 			self.grid.get_mut(coords_dst.into()).unwrap().obj = obj;
 		} else if failed_to_move {
 			self
@@ -231,6 +241,22 @@ impl Game {
 				time_start: Instant::now(),
 				duration: Duration::from_secs_f32(0.05),
 			};
+		}
+
+		if shall_move && !pushed {
+			let coords_maybe_pulled = IVec2::from(coords) - direction;
+			if obj_is_rope
+				|| self
+					.grid
+					.get(coords_maybe_pulled.into())
+					.is_some_and(|tile| {
+						tile
+							.obj
+							.as_ref()
+							.is_some_and(|obj| matches!(obj.kind, ObjKind::Rope))
+					}) {
+				self.obj_move(coords_maybe_pulled.into(), direction, false);
+			}
 		}
 	}
 
@@ -252,7 +278,7 @@ impl Game {
 							.as_mut()
 							.unwrap()
 							.processed = true;
-						self.obj_move(coords, direction);
+						self.obj_move(coords, direction, false);
 					}
 				}
 			}
@@ -299,6 +325,7 @@ impl EventHandler for Game {
 						ObjKind::Player => Sprite::Player,
 						ObjKind::Rock => Sprite::Rock,
 						ObjKind::Wall => Sprite::Wall,
+						ObjKind::Rope => Sprite::Rope,
 					};
 					let rect = match obj.animation {
 						Animation::None => tile_rect(coords),

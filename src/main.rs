@@ -29,6 +29,7 @@ enum Sprite {
 	Rock,
 	Wall,
 	Rope,
+	Soap,
 }
 
 impl Sprite {
@@ -39,6 +40,7 @@ impl Sprite {
 			Sprite::Rock => (3, 0),
 			Sprite::Wall => (2, 0),
 			Sprite::Rope => (4, 0),
+			Sprite::Soap => (5, 0),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -78,6 +80,7 @@ enum ObjKind {
 	Rock,
 	Wall,
 	Rope,
+	Soap,
 }
 
 struct Obj {
@@ -98,6 +101,7 @@ impl Obj {
 			ObjKind::Rock => true,
 			ObjKind::Wall => false,
 			ObjKind::Rope => true,
+			ObjKind::Soap => true,
 		}
 	}
 }
@@ -165,6 +169,7 @@ impl Game {
 		grid.get_mut(Point2::from([5, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
 		grid.get_mut(Point2::from([5, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
 		grid.get_mut(Point2::from([5, 7])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
+		grid.get_mut(Point2::from([2, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Soap));
 		grid.get_mut(Point2::from([2, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Wall));
 		Ok(Game {
 			grid,
@@ -198,12 +203,26 @@ impl Game {
 		let coords_dst = IVec2::from(coords) + direction;
 		let mut shall_move = false;
 		let mut failed_to_move = false;
+		let mut soap_getting_back = None;
 		if let Some(tile) = self.grid.get(coords) {
 			if let Some(obj) = &tile.obj {
 				if obj.can_move() {
 					if let Some(tile_dst) = self.grid.get(coords_dst.into()) {
-						if tile_dst.obj.is_some() {
-							self.obj_move(coords_dst.into(), direction, true);
+						if let Some(obj_dst) = &tile_dst.obj {
+							if matches!(obj_dst.kind, ObjKind::Soap) {
+								soap_getting_back =
+									self.grid.get_mut(coords_dst.into()).unwrap().obj.take();
+							} else {
+								self.obj_move(coords_dst.into(), direction, true);
+							}
+						}
+					}
+					if let Some(tile_dst) = self.grid.get(coords_dst.into()) {
+						if let Some(obj_dst) = &tile_dst.obj {
+							if matches!(obj_dst.kind, ObjKind::Soap) {
+								soap_getting_back =
+									self.grid.get_mut(coords_dst.into()).unwrap().obj.take();
+							}
 						}
 					}
 					if let Some(tile_dst) = self.grid.get(coords_dst.into()) {
@@ -228,6 +247,17 @@ impl Game {
 			};
 			obj_is_rope = matches!(obj.as_mut().unwrap().kind, ObjKind::Rope);
 			self.grid.get_mut(coords_dst.into()).unwrap().obj = obj;
+
+			if let Some(mut soap) = soap_getting_back.take() {
+				if matches!(soap.animation, Animation::None) {
+					soap.animation = Animation::CommingFrom {
+						src: coords_dst.into(),
+						time_start: Instant::now(),
+						duration: Duration::from_secs_f32(0.05),
+					};
+				}
+				self.grid.get_mut(coords).unwrap().obj = Some(soap);
+			}
 		} else if failed_to_move {
 			self
 				.grid
@@ -326,6 +356,7 @@ impl EventHandler for Game {
 						ObjKind::Rock => Sprite::Rock,
 						ObjKind::Wall => Sprite::Wall,
 						ObjKind::Rope => Sprite::Rope,
+						ObjKind::Soap => Sprite::Soap,
 					};
 					let rect = match obj.animation {
 						Animation::None => tile_rect(coords),

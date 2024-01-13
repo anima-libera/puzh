@@ -10,9 +10,12 @@ use ggez::winit::event::VirtualKeyCode;
 use ggez::{Context, ContextBuilder, GameResult};
 
 fn tile_rect(coords: Point2<i32>) -> Rect {
-	let window_x = coords.x * 80;
-	let window_y = coords.y * 80;
-	Rect::new(window_x as f32, window_y as f32, 80.0 / 8.0, 80.0 / 8.0)
+	Rect::new(
+		coords.x as f32 * Tile::W,
+		coords.y as f32 * Tile::H,
+		Tile::W / 8.0,
+		Tile::H / 8.0,
+	)
 }
 
 fn lerp(progress: f32, start: f32, end: f32) -> f32 {
@@ -61,6 +64,11 @@ enum Animation {
 		time_start: Instant,
 		duration: Duration,
 	},
+	FailingToMoveTo {
+		dst: Point2<i32>,
+		time_start: Instant,
+		duration: Duration,
+	},
 }
 
 enum ObjKind {
@@ -95,6 +103,9 @@ struct Tile {
 }
 
 impl Tile {
+	const W: f32 = 80.0;
+	const H: f32 = 80.0;
+
 	fn new() -> Tile {
 		Tile { obj: None }
 	}
@@ -179,6 +190,7 @@ impl Game {
 	fn obj_move(&mut self, coords: Point2<i32>, direction: IVec2) {
 		let coords_dst = IVec2::from(coords) + direction;
 		let mut shall_move = false;
+		let mut failed_to_move = false;
 		if let Some(tile) = self.grid.get(coords) {
 			if let Some(obj) = &tile.obj {
 				if obj.can_move() {
@@ -190,6 +202,8 @@ impl Game {
 					if let Some(tile_dst) = self.grid.get(coords_dst.into()) {
 						if tile_dst.obj.is_none() {
 							shall_move = true;
+						} else {
+							failed_to_move = true;
 						}
 					}
 				}
@@ -204,6 +218,19 @@ impl Game {
 				duration: Duration::from_secs_f32(0.05),
 			};
 			self.grid.get_mut(coords_dst.into()).unwrap().obj = obj;
+		} else if failed_to_move {
+			self
+				.grid
+				.get_mut(coords)
+				.unwrap()
+				.obj
+				.as_mut()
+				.unwrap()
+				.animation = Animation::FailingToMoveTo {
+				dst: coords_dst.into(),
+				time_start: Instant::now(),
+				duration: Duration::from_secs_f32(0.05),
+			};
 		}
 	}
 
@@ -276,12 +303,30 @@ impl EventHandler for Game {
 					let rect = match obj.animation {
 						Animation::None => tile_rect(coords),
 						Animation::CommingFrom { src, time_start, duration } => {
-							let dst_rect = tile_rect(coords);
 							let src_rect = tile_rect(src);
+							let dst_rect = tile_rect(coords);
 							let progress = time_start.elapsed().as_secs_f32() / duration.as_secs_f32();
 							let progress = progress.clamp(0.0, 1.0);
 							let window_x = lerp(progress, src_rect.x, dst_rect.x);
 							let window_y = lerp(progress, src_rect.y, dst_rect.y);
+							Rect::new(window_x, window_y, dst_rect.w, dst_rect.h)
+						},
+						Animation::FailingToMoveTo { dst, time_start, duration } => {
+							let src_rect = tile_rect(coords);
+							let mut dst_rect = tile_rect(dst);
+							dst_rect.x = lerp(0.1, src_rect.x, dst_rect.x);
+							dst_rect.y = lerp(0.1, src_rect.y, dst_rect.y);
+							let progress = time_start.elapsed().as_secs_f32() / duration.as_secs_f32();
+							let progress = progress.clamp(0.0, 1.0);
+							let (window_x, window_y) = if progress <= 0.5 {
+								let window_x = lerp(progress * 2.0, src_rect.x, dst_rect.x);
+								let window_y = lerp(progress * 2.0, src_rect.y, dst_rect.y);
+								(window_x, window_y)
+							} else {
+								let window_x = lerp(progress * 2.0 - 1.0, dst_rect.x, src_rect.x);
+								let window_y = lerp(progress * 2.0 - 1.0, dst_rect.y, src_rect.y);
+								(window_x, window_y)
+							};
 							Rect::new(window_x, window_y, dst_rect.w, dst_rect.h)
 						},
 					};
@@ -298,7 +343,9 @@ impl EventHandler for Game {
 fn main() -> GameResult {
 	let (mut ctx, event_loop) = ContextBuilder::new("Puzh", "Anima :3")
 		.window_setup(WindowSetup::default().title("Puzh").vsync(true).srgb(false))
-		.window_mode(WindowMode::default().dimensions(960.0, 960.0))
+		.window_mode(
+			WindowMode::default().dimensions(Grid::W as f32 * Tile::W, Grid::H as f32 * Tile::H),
+		)
 		.build()
 		.unwrap();
 	let game = Game::new(&mut ctx)?;

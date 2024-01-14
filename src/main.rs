@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use ggez::conf::{WindowMode, WindowSetup};
 use ggez::event::{self, EventHandler};
-use ggez::glam::IVec2;
+use ggez::glam::{IVec2, Vec2};
 use ggez::graphics::{self, Canvas, Color, DrawParam, Image, Rect};
 use ggez::input::keyboard::KeyInput;
 use ggez::mint::Point2;
@@ -13,8 +13,8 @@ fn tile_rect(coords: Point2<i32>) -> Rect {
 	Rect::new(
 		coords.x as f32 * Tile::W,
 		coords.y as f32 * Tile::H,
-		Tile::W / 8.0,
-		Tile::H / 8.0,
+		Tile::W,
+		Tile::H,
 	)
 }
 
@@ -30,6 +30,7 @@ enum Sprite {
 	Wall,
 	Rope,
 	Soap,
+	Raygun,
 }
 
 impl Sprite {
@@ -41,6 +42,7 @@ impl Sprite {
 			Sprite::Wall => (2, 0),
 			Sprite::Rope => (4, 0),
 			Sprite::Soap => (5, 0),
+			Sprite::Raygun => (2, 2),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -52,6 +54,9 @@ impl Sprite {
 }
 
 fn draw_sprite(sprite: Sprite, dst: Rect, z: i32, canvas: &mut Canvas, spritesheet: &Image) {
+	let mut dst = dst;
+	dst.w /= 8.0;
+	dst.h /= 8.0; // Why is this needed ?
 	canvas.draw(
 		spritesheet,
 		DrawParam::default()
@@ -81,6 +86,7 @@ enum ObjKind {
 	Wall,
 	Rope,
 	Soap,
+	Raygun,
 }
 
 struct Obj {
@@ -102,6 +108,7 @@ impl Obj {
 			ObjKind::Wall => false,
 			ObjKind::Rope => true,
 			ObjKind::Soap => true,
+			ObjKind::Raygun => true,
 		}
 	}
 }
@@ -155,8 +162,25 @@ impl Grid {
 	}
 }
 
+enum RayAction {
+	SwapWith { with_who_coords: Point2<i32> },
+}
+
+struct Ray {
+	coords: Point2<i32>,
+	direction: IVec2,
+	action: RayAction,
+}
+
+struct RaysAnimation {
+	time_start: Instant,
+	duration: Duration,
+}
+
 struct Game {
 	grid: Grid,
+	rays: Vec<Ray>,
+	rays_animation: Option<RaysAnimation>,
 	spritesheet: Image,
 }
 
@@ -170,9 +194,12 @@ impl Game {
 		grid.get_mut(Point2::from([5, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
 		grid.get_mut(Point2::from([5, 7])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
 		grid.get_mut(Point2::from([2, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Soap));
+		grid.get_mut(Point2::from([3, 8])).unwrap().obj = Some(Obj::from_kind(ObjKind::Raygun));
 		grid.get_mut(Point2::from([2, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Wall));
 		Ok(Game {
 			grid,
+			rays: vec![],
+			rays_animation: None,
 			spritesheet: Image::from_bytes(ctx, include_bytes!("../assets/spritesheet.png"))?,
 		})
 	}
@@ -314,21 +341,111 @@ impl Game {
 			}
 		}
 	}
+
+	fn player_shoot(&mut self) {
+		self.clear_processed_flags();
+		self.clear_moved_flags();
+		self.clear_animations();
+
+		for grid_y in 0..Grid::H {
+			for grid_x in 0..Grid::W {
+				let coords = Point2::from([grid_x, grid_y]);
+				if let Some(obj) = &self.grid.get(coords).unwrap().obj {
+					if matches!(obj.kind, ObjKind::Player) && !obj.processed {
+						self
+							.grid
+							.get_mut(coords)
+							.unwrap()
+							.obj
+							.as_mut()
+							.unwrap()
+							.processed = true;
+						for move_to_neighboor in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
+							let (dx, dy) = move_to_neighboor;
+							let player_to_neighboor = IVec2::from([dx, dy]);
+							let neighboor_coords = IVec2::from(coords) + player_to_neighboor;
+							if let Some(neighboor_obj) = &self
+								.grid
+								.get(neighboor_coords.into())
+								.and_then(|tile| tile.obj.as_ref())
+							{
+								if matches!(neighboor_obj.kind, ObjKind::Raygun) {
+									self.rays.push(Ray {
+										coords: neighboor_coords.into(),
+										direction: player_to_neighboor,
+										action: RayAction::SwapWith { with_who_coords: coords },
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 impl EventHandler for Game {
 	fn update(&mut self, _ctx: &mut Context) -> GameResult {
+		if !self.rays.is_empty() {
+			if self.rays_animation.is_none() {
+				self.rays_animation = Some(RaysAnimation {
+					time_start: Instant::now(),
+					duration: Duration::from_secs_f32(0.02),
+				})
+			}
+
+			if let Some(RaysAnimation { time_start, duration }) = self.rays_animation {
+				let progress = time_start.elapsed().as_secs_f32() / duration.as_secs_f32();
+				if progress >= 1.0 {
+					self.rays_animation = None;
+					let mut rays_indices_to_remove = vec![];
+					for (ray_index, ray) in self.rays.iter_mut().enumerate() {
+						let dst_coords = IVec2::from(ray.coords) + ray.direction;
+						if let Some(dst_tile) = self.grid.get(dst_coords.into()) {
+							if dst_tile.obj.is_some() {
+								match ray.action {
+									RayAction::SwapWith { with_who_coords } => {
+										rays_indices_to_remove.push(ray_index);
+										let shootee =
+											self.grid.get_mut(dst_coords.into()).unwrap().obj.take();
+										let shooter = self.grid.get_mut(with_who_coords).unwrap().obj.take();
+										self.grid.get_mut(dst_coords.into()).unwrap().obj = shooter;
+										self.grid.get_mut(with_who_coords).unwrap().obj = shootee;
+									},
+								}
+							} else {
+								ray.coords = dst_coords.into();
+							}
+						} else {
+							rays_indices_to_remove.push(ray_index);
+						}
+					}
+					rays_indices_to_remove.sort();
+					for index_to_remove in rays_indices_to_remove.into_iter().rev() {
+						self.rays.remove(index_to_remove);
+					}
+				}
+			}
+		}
+
 		Ok(())
 	}
 
 	fn key_down_event(&mut self, ctx: &mut Context, input: KeyInput, _repeated: bool) -> GameResult {
-		match input.keycode {
-			Some(VirtualKeyCode::Escape) => ctx.request_quit(),
-			Some(VirtualKeyCode::Up) => self.player_move(IVec2::from([0, -1])),
-			Some(VirtualKeyCode::Down) => self.player_move(IVec2::from([0, 1])),
-			Some(VirtualKeyCode::Left) => self.player_move(IVec2::from([-1, 0])),
-			Some(VirtualKeyCode::Right) => self.player_move(IVec2::from([1, 0])),
-			_ => {},
+		if let Some(VirtualKeyCode::Escape) = input.keycode {
+			ctx.request_quit()
+		}
+
+		if self.rays.is_empty() {
+			match input.keycode {
+				Some(VirtualKeyCode::Up) => self.player_move(IVec2::from([0, -1])),
+				Some(VirtualKeyCode::Down) => self.player_move(IVec2::from([0, 1])),
+				Some(VirtualKeyCode::Left) => self.player_move(IVec2::from([-1, 0])),
+				Some(VirtualKeyCode::Right) => self.player_move(IVec2::from([1, 0])),
+				Some(VirtualKeyCode::Space) | Some(VirtualKeyCode::Return) => self.player_shoot(),
+				_ => {},
+			}
 		}
 
 		Ok(())
@@ -337,6 +454,27 @@ impl EventHandler for Game {
 	fn draw(&mut self, ctx: &mut Context) -> GameResult {
 		let mut canvas = Canvas::from_frame(ctx, Color::BLACK);
 		canvas.set_sampler(graphics::Sampler::nearest_clamp());
+
+		for ray in self.rays.iter() {
+			let center = if let Some(RaysAnimation { time_start, duration }) = self.rays_animation {
+				let dst = IVec2::from(ray.coords) + ray.direction;
+				let center_src = tile_rect(ray.coords).center();
+				let center_dst = tile_rect(dst.into()).center();
+				let progress = time_start.elapsed().as_secs_f32() / duration.as_secs_f32();
+				let progress = progress.clamp(0.0, 1.0);
+				let window_x = lerp(progress, center_src.x, center_dst.x);
+				let window_y = lerp(progress, center_src.y, center_dst.y);
+				Point2::from([window_x, window_y])
+			} else {
+				tile_rect(ray.coords).center()
+			};
+			let a = Vec2::from(center) + ray.direction.as_vec2() * 0.5 * Vec2::new(Tile::W, Tile::H);
+			let b = Vec2::from(center) - ray.direction.as_vec2() * 0.5 * Vec2::new(Tile::W, Tile::H);
+			canvas.draw(
+				&graphics::Mesh::new_line(ctx, &[a, b], 5.0, Color::YELLOW)?,
+				DrawParam::default().z(3),
+			);
+		}
 
 		for grid_y in 0..Grid::H {
 			for grid_x in 0..Grid::W {
@@ -357,6 +495,7 @@ impl EventHandler for Game {
 						ObjKind::Wall => Sprite::Wall,
 						ObjKind::Rope => Sprite::Rope,
 						ObjKind::Soap => Sprite::Soap,
+						ObjKind::Raygun => Sprite::Raygun,
 					};
 					let rect = match obj.animation {
 						Animation::None => tile_rect(coords),

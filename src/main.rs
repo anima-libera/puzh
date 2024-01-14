@@ -100,33 +100,46 @@ enum Animation {
 	},
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum RaygunKind {
 	SwapWithShooter,
 	DuplicateShootee,
+	TurnInto(Box<ObjKind>),
 }
 
 impl RaygunKind {
-	fn color(self) -> Color {
+	fn color(&self) -> Color {
 		match self {
 			RaygunKind::SwapWithShooter => Color::YELLOW,
 			RaygunKind::DuplicateShootee => Color::CYAN,
+			RaygunKind::TurnInto(_) => Color::WHITE,
 		}
 	}
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum ObjKind {
+	/// Moved by arrow keys, can shoot guns. There can be multiple players.
 	Player,
+	/// Can be pushed (like most objects actually).
 	Rock,
+	/// Can *not* be pushed.
 	Wall,
+	/// Is pulled by anything that moves away, and pulls what is behind itself.
 	Rope,
+	/// Swaps places with what pushes it (or what follows it, etc.) instead of being pushed.
 	Soap,
+	/// Players can use these to shoot rays or various effects.
 	Raygun(RaygunKind),
+	/// Rays bounce back.
 	Mirror,
+	/// Rays bounce in an intuitive way on a `/` shaped mirror.
 	MirrorSlopeUp,
+	/// Rays bounce in an intuitive way on a `\` shaped mirror.
 	MirrorSlopeDown,
+	/// Can not be pushed, can be cut with an axe.
 	Tree,
+	/// Cuts down trees when pushed into them.
 	Axe,
 }
 
@@ -149,7 +162,10 @@ impl Obj {
 
 enum Ground {
 	Grass,
-	Sapling { stepped_on: bool },
+	/// A sapling can be stepped on, then it will grow a tree when it can.
+	Sapling {
+		stepped_on: bool,
+	},
 }
 
 struct Tile {
@@ -205,6 +221,7 @@ impl Grid {
 enum RayAction {
 	SwapWith { with_who_coords: Point2<i32> },
 	Duplicate,
+	TurnInto { into_what: ObjKind },
 }
 
 struct Ray {
@@ -239,6 +256,9 @@ impl Game {
 			Some(Obj::from_kind(ObjKind::Raygun(RaygunKind::SwapWithShooter)));
 		grid.get_mut(Point2::from([4, 9])).unwrap().obj = Some(Obj::from_kind(ObjKind::Raygun(
 			RaygunKind::DuplicateShootee,
+		)));
+		grid.get_mut(Point2::from([2, 9])).unwrap().obj = Some(Obj::from_kind(ObjKind::Raygun(
+			RaygunKind::TurnInto(Box::new(ObjKind::Rock)),
 		)));
 		grid.get_mut(Point2::from([2, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Wall));
 		grid.get_mut(Point2::from([8, 8])).unwrap().obj = Some(Obj::from_kind(ObjKind::Mirror));
@@ -445,7 +465,7 @@ impl Game {
 								.get(neighboor_coords.into())
 								.and_then(|tile| tile.obj.as_ref())
 							{
-								if let ObjKind::Raygun(kind) = neighboor_obj.kind {
+								if let ObjKind::Raygun(kind) = neighboor_obj.kind.clone() {
 									self.rays.push(Ray {
 										coords: neighboor_coords.into(),
 										direction: player_to_neighboor,
@@ -454,6 +474,9 @@ impl Game {
 												RayAction::SwapWith { with_who_coords: coords }
 											},
 											RaygunKind::DuplicateShootee => RayAction::Duplicate,
+											RaygunKind::TurnInto(into_what) => {
+												RayAction::TurnInto { into_what: *into_what }
+											},
 										},
 									})
 								}
@@ -528,12 +551,18 @@ impl EventHandler for Game {
 											.obj
 											.as_ref()
 											.unwrap()
-											.kind;
+											.kind
+											.clone();
 										let obj_to_be_duplicated_to =
 											&mut self.grid.get_mut(ray.coords).unwrap().obj;
 										if obj_to_be_duplicated_to.is_none() {
 											*obj_to_be_duplicated_to = Some(Obj::from_kind(shootee_kind));
 										}
+									},
+									RayAction::TurnInto { ref into_what } => {
+										rays_indices_to_remove.push(ray_index);
+										self.grid.get_mut(dst_coords.into()).unwrap().obj =
+											Some(Obj::from_kind(into_what.clone()));
 									},
 								}
 							} else {
@@ -596,6 +625,9 @@ impl EventHandler for Game {
 			let raygun_kind = match ray.action {
 				RayAction::SwapWith { .. } => RaygunKind::SwapWithShooter,
 				RayAction::Duplicate => RaygunKind::DuplicateShootee,
+				RayAction::TurnInto { ref into_what } => {
+					RaygunKind::TurnInto(Box::new(into_what.clone()))
+				},
 			};
 			let color = raygun_kind.color();
 			canvas.draw(
@@ -648,7 +680,7 @@ impl EventHandler for Game {
 						ObjKind::Tree => Sprite::Tree,
 						ObjKind::Axe => Sprite::Axe,
 					};
-					let color = match obj.kind {
+					let color = match &obj.kind {
 						ObjKind::Raygun(raygun_kind) => raygun_kind.color(),
 						_ => Color::WHITE,
 					};

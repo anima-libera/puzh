@@ -38,6 +38,8 @@ enum Sprite {
 	Tree,
 	Axe,
 	WallWithHoles,
+	Cheese,
+	Bunny,
 }
 
 impl Sprite {
@@ -57,6 +59,8 @@ impl Sprite {
 			Sprite::Tree => (2, 1),
 			Sprite::Axe => (4, 1),
 			Sprite::WallWithHoles => (2, 3),
+			Sprite::Cheese => (0, 1),
+			Sprite::Bunny => (0, 3),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -151,6 +155,10 @@ enum ObjKind {
 	Axe,
 	/// Like a wall but lets rays through.
 	WallWithHoles,
+	/// Cheese.
+	Cheese,
+	/// Moves away from the player if it has line of sight. It is shy. Bnuuy.
+	Bunny,
 }
 
 impl ObjKind {
@@ -168,6 +176,8 @@ impl ObjKind {
 			ObjKind::Tree => Sprite::Tree,
 			ObjKind::Axe => Sprite::Axe,
 			ObjKind::WallWithHoles => Sprite::WallWithHoles,
+			ObjKind::Cheese => Sprite::Cheese,
+			ObjKind::Bunny => Sprite::Bunny,
 		};
 		let color = match self {
 			ObjKind::Raygun(raygun_kind) => raygun_kind.color(),
@@ -278,6 +288,7 @@ struct Game {
 	rays: Vec<Ray>,
 	rays_animation: Option<RaysAnimation>,
 	spritesheet: Image,
+	cheese_count: u32,
 }
 
 impl Game {
@@ -314,11 +325,15 @@ impl Game {
 		grid.get_mut(Point2::from([9, 10])).unwrap().obj = Some(Obj::from_kind(ObjKind::Axe));
 		grid.get_mut(Point2::from([4, 2])).unwrap().obj =
 			Some(Obj::from_kind(ObjKind::WallWithHoles));
+		grid.get_mut(Point2::from([10, 4])).unwrap().obj = Some(Obj::from_kind(ObjKind::Cheese));
+		grid.get_mut(Point2::from([10, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Bunny));
+
 		Ok(Game {
 			grid,
 			rays: vec![],
 			rays_animation: None,
 			spritesheet: Image::from_bytes(ctx, include_bytes!("../assets/spritesheet.png"))?,
+			cheese_count: 0,
 		})
 	}
 
@@ -357,6 +372,10 @@ impl Game {
 		}
 	}
 
+	fn handle_bunnies(&mut self) {
+		todo!()
+	}
+
 	fn obj_move(&mut self, coords: Point2<i32>, direction: IVec2, pushed: bool) {
 		let coords_dst = IVec2::from(coords) + direction;
 		let mut shall_move = false;
@@ -374,6 +393,11 @@ impl Game {
 								&& matches!(obj_dst.kind, ObjKind::Tree)
 							{
 								self.grid.get_mut(coords_dst.into()).unwrap().obj = None;
+							} else if matches!(obj.kind, ObjKind::Player)
+								&& matches!(obj_dst.kind, ObjKind::Cheese)
+							{
+								self.grid.get_mut(coords_dst.into()).unwrap().obj = None;
+								self.cheese_count += 1;
 							} else {
 								self.obj_move(coords_dst.into(), direction, true);
 							}
@@ -417,24 +441,20 @@ impl Game {
 						time_start: Instant::now(),
 						duration: Duration::from_secs_f32(0.05),
 					};
+					soap.moved = true;
 				}
 				self.grid.get_mut(coords).unwrap().obj = Some(soap);
 			}
 
 			self.handle_sapling(false);
 		} else if failed_to_move {
-			self
-				.grid
-				.get_mut(coords)
-				.unwrap()
-				.obj
-				.as_mut()
-				.unwrap()
-				.animation = Animation::FailingToMoveTo {
-				dst: coords_dst.into(),
-				time_start: Instant::now(),
-				duration: Duration::from_secs_f32(0.05),
-			};
+			if let Some(obj) = self.grid.get_mut(coords).unwrap().obj.as_mut() {
+				obj.animation = Animation::FailingToMoveTo {
+					dst: coords_dst.into(),
+					time_start: Instant::now(),
+					duration: Duration::from_secs_f32(0.05),
+				};
+			}
 		}
 
 		if shall_move && !pushed {
@@ -796,6 +816,17 @@ impl EventHandler for Game {
 					}
 				}
 			}
+		}
+
+		if self.cheese_count >= 1 {
+			let cheese_text = format!(
+				"{} cheese{}",
+				self.cheese_count,
+				if self.cheese_count >= 2 { "s" } else { "" }
+			);
+			let mut text = graphics::Text::new(cheese_text);
+			text.set_scale(30.0);
+			canvas.draw(&text, DrawParam::default().z(8).color(Color::BLACK));
 		}
 
 		canvas.finish(ctx)?;

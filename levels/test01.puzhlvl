@@ -1,0 +1,22 @@
+name test uwu :3
+grid
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+# #     #     #     # #
+p       #     #        
+# #     #     #     # #
+# #     # r   # # # # #
+# #     #     #     # #
+# #   g #     #     # #
+# #     #     #     # #
+# #     #   g #     # #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+
+obj space none
+obj # wall
+obj p player
+obj g raygun:swap
+obj r rope
+obj o wall_with_holes
+obj c cheese

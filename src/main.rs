@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ggez::conf::{WindowMode, WindowSetup};
@@ -92,6 +93,7 @@ fn draw_sprite(
 	);
 }
 
+#[derive(Clone)]
 enum Animation {
 	None,
 	CommingFrom {
@@ -187,6 +189,7 @@ impl ObjKind {
 	}
 }
 
+#[derive(Clone)]
 struct Obj {
 	kind: ObjKind,
 	processed: bool,
@@ -207,6 +210,7 @@ impl Obj {
 	}
 }
 
+#[derive(Clone)]
 enum Ground {
 	Grass,
 	/// A sapling can be stepped on, then it will grow a tree when it can.
@@ -215,6 +219,7 @@ enum Ground {
 	},
 }
 
+#[derive(Clone)]
 struct Tile {
 	obj: Option<Obj>,
 	ground: Ground,
@@ -229,6 +234,7 @@ impl Tile {
 	}
 }
 
+#[derive(Clone)]
 struct Grid {
 	tiles: Vec<Tile>,
 }
@@ -283,16 +289,14 @@ struct RaysAnimation {
 	duration: Duration,
 }
 
-struct Game {
+struct Level {
 	grid: Grid,
-	rays: Vec<Ray>,
-	rays_animation: Option<RaysAnimation>,
-	spritesheet: Image,
-	cheese_count: u32,
+	name: String,
+	error_messages: Vec<String>,
 }
 
-impl Game {
-	pub fn new(ctx: &mut Context) -> GameResult<Game> {
+impl Level {
+	fn _test() -> Level {
 		let mut grid = Grid::new();
 		grid.get_mut(Point2::from([3, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
 		//grid.get_mut(Point2::from([2, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
@@ -328,12 +332,160 @@ impl Game {
 		grid.get_mut(Point2::from([10, 4])).unwrap().obj = Some(Obj::from_kind(ObjKind::Cheese));
 		grid.get_mut(Point2::from([10, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Bunny));
 
+		Level { grid, name: "test".to_string(), error_messages: vec![] }
+	}
+
+	fn load_from_text(text: &str) -> Level {
+		let mut grid = Grid::new();
+		let mut chars_to_coords: HashMap<char, Vec<Point2<i32>>> = HashMap::new();
+		let mut name = "name".to_string();
+		let mut error_messages = vec![];
+		let mut lines = text.lines().enumerate();
+		while let Some((line_index, line)) = lines.next() {
+			let line_number = line_index + 1;
+			let words: Vec<_> = line.split_ascii_whitespace().collect();
+			if words.is_empty() {
+				continue;
+			}
+			match words[0] {
+				"name" => {
+					if words.len() >= 2 {
+						name = words[1..].join(" ").to_string();
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing name argument at line {line_number}"
+						));
+					}
+				},
+				"grid" => {
+					for grid_row_index in 0..Grid::H {
+						let grid_row_number = grid_row_index + 1;
+						let (_line_index, line) = if let Some(line) = lines.next() {
+							line
+						} else {
+							error_messages.push(format!(
+								"syntax error: missing {grid_row_number}-th grid row at end of file"
+							));
+							break;
+						};
+						for (x, character) in line
+							.chars()
+							.enumerate()
+							.filter_map(|(i, c)| if i % 2 == 0 { Some(c) } else { None })
+							.enumerate()
+						{
+							let coords = Point2::from([x as i32, grid_row_index]);
+							let entry = chars_to_coords.entry(character);
+							entry.or_default().push(coords);
+						}
+					}
+				},
+				"obj" => {
+					let character = if let Some(word) = words.get(1) {
+						if *word == "space" {
+							' '
+						} else if word.len() == 1 {
+							word.chars().next().unwrap()
+						} else {
+							error_messages.push(format!(
+								"syntax error: should be a single character after \"obj\" at line {line_number}"
+							));
+							continue;
+						}
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing character after \"obj\" at line {line_number}"
+						));
+						continue;
+					};
+					let obj_descr = if let Some(word) = words.get(2) {
+						word
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing object description after \"obj\" at line {line_number}"
+						));
+						continue;
+					};
+					let obj = match *obj_descr {
+						"none" => None,
+						"player" => Some(Obj::from_kind(ObjKind::Player)),
+						"rock" => Some(Obj::from_kind(ObjKind::Rock)),
+						"wall" => Some(Obj::from_kind(ObjKind::Wall)),
+						"rope" => Some(Obj::from_kind(ObjKind::Rope)),
+						"soap" => Some(Obj::from_kind(ObjKind::Soap)),
+						"mirror" => Some(Obj::from_kind(ObjKind::Mirror)),
+						"mirror_slope_up" => Some(Obj::from_kind(ObjKind::MirrorSlopeUp)),
+						"mirror_slope_down" => Some(Obj::from_kind(ObjKind::MirrorSlopeDown)),
+						"tree" => Some(Obj::from_kind(ObjKind::Tree)),
+						"axe" => Some(Obj::from_kind(ObjKind::Axe)),
+						"wall_with_holes" => Some(Obj::from_kind(ObjKind::WallWithHoles)),
+						"cheese" => Some(Obj::from_kind(ObjKind::Cheese)),
+						"bunny" => Some(Obj::from_kind(ObjKind::Bunny)),
+						raygun if raygun.starts_with("raygun") => {
+							let raygun_kind = match raygun.split(':').nth(1) {
+								Some("swap") => RaygunKind::SwapWithShooter,
+								Some("duplicate") => RaygunKind::DuplicateShootee,
+								Some("turnintoturninto") => RaygunKind::TurnIntoTurnInto,
+								Some(unknown_kind) => {
+									error_messages.push(format!(
+										"syntax error: unknown raygun kind \"{unknown_kind}\" at line {line_number}"
+									));
+									continue;
+								},
+								None => {
+									error_messages.push(format!(
+										"syntax error: missing raygun model at line {line_number}"
+									));
+									continue;
+								},
+							};
+							Some(Obj::from_kind(ObjKind::Raygun(raygun_kind)))
+						},
+						unknown_obj => {
+							error_messages.push(format!(
+								"syntax error: unknown object \"{unknown_obj}\" at line {line_number}"
+							));
+							continue;
+						},
+					};
+					if let Some(coords_list) = chars_to_coords.get(&character) {
+						for coords in coords_list {
+							grid.get_mut(*coords).unwrap().obj = obj.clone();
+						}
+					}
+				},
+				unknown_word => error_messages.push(format!(
+					"syntax error: unknown \"{unknown_word}\" at line {line_number}"
+				)),
+			}
+		}
+		Level { grid, name, error_messages }
+	}
+}
+
+struct Game {
+	level: Level,
+	grid: Grid,
+	rays: Vec<Ray>,
+	rays_animation: Option<RaysAnimation>,
+	spritesheet: Image,
+	cheese_count: u32,
+	step_count: u32,
+}
+
+impl Game {
+	pub fn new(ctx: &mut Context) -> GameResult<Game> {
+		//let level = Level::_test();
+		let level = Level::load_from_text(&std::fs::read_to_string("levels/test01.puzhlvl").unwrap());
+		let grid = level.grid.clone();
 		Ok(Game {
+			level,
 			grid,
 			rays: vec![],
 			rays_animation: None,
 			spritesheet: Image::from_bytes(ctx, include_bytes!("../assets/spritesheet.png"))?,
 			cheese_count: 0,
+			step_count: 0,
 		})
 	}
 
@@ -372,7 +524,7 @@ impl Game {
 		}
 	}
 
-	fn handle_bunnies(&mut self) {
+	fn _handle_bunnies(&mut self) {
 		todo!()
 	}
 
@@ -498,6 +650,7 @@ impl Game {
 			}
 		}
 
+		self.step_count += 1;
 		self.handle_sapling(true);
 	}
 
@@ -669,19 +822,21 @@ impl EventHandler for Game {
 	}
 
 	fn key_down_event(&mut self, ctx: &mut Context, input: KeyInput, _repeated: bool) -> GameResult {
-		if let Some(VirtualKeyCode::Escape) = input.keycode {
-			ctx.request_quit()
-		}
-
-		if self.rays.is_empty() {
-			match input.keycode {
-				Some(VirtualKeyCode::Up) => self.player_move(IVec2::from([0, -1])),
-				Some(VirtualKeyCode::Down) => self.player_move(IVec2::from([0, 1])),
-				Some(VirtualKeyCode::Left) => self.player_move(IVec2::from([-1, 0])),
-				Some(VirtualKeyCode::Right) => self.player_move(IVec2::from([1, 0])),
-				Some(VirtualKeyCode::Space) | Some(VirtualKeyCode::Return) => self.player_shoot(),
-				_ => {},
-			}
+		let can_play = self.rays.is_empty();
+		match input.keycode {
+			Some(VirtualKeyCode::Escape) => ctx.request_quit(),
+			Some(VirtualKeyCode::R) => {
+				self.rays = vec![];
+				self.grid = self.level.grid.clone();
+			},
+			Some(VirtualKeyCode::Up) if can_play => self.player_move(IVec2::from([0, -1])),
+			Some(VirtualKeyCode::Down) if can_play => self.player_move(IVec2::from([0, 1])),
+			Some(VirtualKeyCode::Left) if can_play => self.player_move(IVec2::from([-1, 0])),
+			Some(VirtualKeyCode::Right) if can_play => self.player_move(IVec2::from([1, 0])),
+			Some(VirtualKeyCode::Space) | Some(VirtualKeyCode::Return) if can_play => {
+				self.player_shoot()
+			},
+			_ => {},
 		}
 
 		Ok(())
@@ -818,6 +973,21 @@ impl EventHandler for Game {
 			}
 		}
 
+		let mut text_y = 0.0;
+		{
+			let mut text = graphics::Text::new(&self.level.name);
+			let scale = 30.0;
+			text.set_scale(scale);
+			canvas.draw(
+				&text,
+				DrawParam::default()
+					.z(8)
+					.color(Color::BLACK)
+					.offset(Vec2::from([0.0, text_y])),
+			);
+			text_y -= scale;
+		}
+
 		if self.cheese_count >= 1 {
 			let cheese_text = format!(
 				"{} cheese{}",
@@ -825,8 +995,44 @@ impl EventHandler for Game {
 				if self.cheese_count >= 2 { "s" } else { "" }
 			);
 			let mut text = graphics::Text::new(cheese_text);
-			text.set_scale(30.0);
-			canvas.draw(&text, DrawParam::default().z(8).color(Color::BLACK));
+			let scale = 30.0;
+			text.set_scale(scale);
+			canvas.draw(
+				&text,
+				DrawParam::default()
+					.z(8)
+					.color(Color::BLACK)
+					.offset(Vec2::from([0.0, text_y])),
+			);
+			text_y -= scale;
+		}
+
+		{
+			let mut text = graphics::Text::new(&format!(" {} steps", self.step_count));
+			let scale = 20.0;
+			text.set_scale(scale);
+			canvas.draw(
+				&text,
+				DrawParam::default()
+					.z(8)
+					.color(Color::BLACK)
+					.offset(Vec2::from([0.0, text_y])),
+			);
+			text_y -= scale;
+		}
+
+		for error_message in self.level.error_messages.iter() {
+			let mut text = graphics::Text::new(error_message);
+			let scale = 20.0;
+			text.set_scale(scale);
+			canvas.draw(
+				&text,
+				DrawParam::default()
+					.z(8)
+					.color(Color::new(0.6, 0.0, 0.0, 1.0))
+					.offset(Vec2::from([0.0, text_y])),
+			);
+			text_y -= scale;
 		}
 
 		canvas.finish(ctx)?;

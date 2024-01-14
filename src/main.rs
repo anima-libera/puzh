@@ -31,6 +31,9 @@ enum Sprite {
 	Rope,
 	Soap,
 	Raygun,
+	Mirror,
+	MirrorSlopeUp,
+	MirrorSlopeDown,
 }
 
 impl Sprite {
@@ -43,6 +46,9 @@ impl Sprite {
 			Sprite::Rope => (4, 0),
 			Sprite::Soap => (5, 0),
 			Sprite::Raygun => (2, 2),
+			Sprite::Mirror => (3, 2),
+			Sprite::MirrorSlopeUp => (4, 2),
+			Sprite::MirrorSlopeDown => (5, 2),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -111,6 +117,9 @@ enum ObjKind {
 	Rope,
 	Soap,
 	Raygun(RaygunKind),
+	Mirror,
+	MirrorSlopeUp,
+	MirrorSlopeDown,
 }
 
 struct Obj {
@@ -126,14 +135,7 @@ impl Obj {
 	}
 
 	fn can_move(&self) -> bool {
-		match self.kind {
-			ObjKind::Player => true,
-			ObjKind::Rock => true,
-			ObjKind::Wall => false,
-			ObjKind::Rope => true,
-			ObjKind::Soap => true,
-			ObjKind::Raygun(_) => true,
-		}
+		!matches!(self.kind, ObjKind::Wall)
 	}
 }
 
@@ -225,6 +227,11 @@ impl Game {
 			RaygunKind::DuplicateShootee,
 		)));
 		grid.get_mut(Point2::from([2, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Wall));
+		grid.get_mut(Point2::from([8, 8])).unwrap().obj = Some(Obj::from_kind(ObjKind::Mirror));
+		grid.get_mut(Point2::from([8, 9])).unwrap().obj =
+			Some(Obj::from_kind(ObjKind::MirrorSlopeDown));
+		grid.get_mut(Point2::from([8, 10])).unwrap().obj =
+			Some(Obj::from_kind(ObjKind::MirrorSlopeUp));
 		Ok(Game {
 			grid,
 			rays: vec![],
@@ -437,7 +444,32 @@ impl EventHandler for Game {
 					for (ray_index, ray) in self.rays.iter_mut().enumerate() {
 						let dst_coords = IVec2::from(ray.coords) + ray.direction;
 						if let Some(dst_tile) = self.grid.get(dst_coords.into()) {
-							if dst_tile.obj.is_some() {
+							if dst_tile
+								.obj
+								.as_ref()
+								.is_some_and(|obj| matches!(obj.kind, ObjKind::Mirror))
+							{
+								ray.coords = dst_coords.into();
+								ray.direction = -ray.direction;
+							} else if dst_tile
+								.obj
+								.as_ref()
+								.is_some_and(|obj| matches!(obj.kind, ObjKind::MirrorSlopeUp))
+							{
+								ray.coords = dst_coords.into();
+								let dir = ray.direction;
+								ray.direction.y = -dir.x;
+								ray.direction.x = -dir.y;
+							} else if dst_tile
+								.obj
+								.as_ref()
+								.is_some_and(|obj| matches!(obj.kind, ObjKind::MirrorSlopeDown))
+							{
+								ray.coords = dst_coords.into();
+								let dir = ray.direction;
+								ray.direction.y = dir.x;
+								ray.direction.x = dir.y;
+							} else if dst_tile.obj.is_some() {
 								match ray.action {
 									RayAction::SwapWith { with_who_coords } => {
 										rays_indices_to_remove.push(ray_index);
@@ -552,6 +584,9 @@ impl EventHandler for Game {
 						ObjKind::Rope => Sprite::Rope,
 						ObjKind::Soap => Sprite::Soap,
 						ObjKind::Raygun(_) => Sprite::Raygun,
+						ObjKind::Mirror => Sprite::Mirror,
+						ObjKind::MirrorSlopeUp => Sprite::MirrorSlopeUp,
+						ObjKind::MirrorSlopeDown => Sprite::MirrorSlopeDown,
 					};
 					let color = match obj.kind {
 						ObjKind::Raygun(raygun_kind) => raygun_kind.color(),

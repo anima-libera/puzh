@@ -34,6 +34,9 @@ enum Sprite {
 	Mirror,
 	MirrorSlopeUp,
 	MirrorSlopeDown,
+	Sapling,
+	Tree,
+	Axe,
 }
 
 impl Sprite {
@@ -49,6 +52,9 @@ impl Sprite {
 			Sprite::Mirror => (3, 2),
 			Sprite::MirrorSlopeUp => (4, 2),
 			Sprite::MirrorSlopeDown => (5, 2),
+			Sprite::Sapling => (3, 1),
+			Sprite::Tree => (2, 1),
+			Sprite::Axe => (4, 1),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -120,6 +126,8 @@ enum ObjKind {
 	Mirror,
 	MirrorSlopeUp,
 	MirrorSlopeDown,
+	Tree,
+	Axe,
 }
 
 struct Obj {
@@ -135,12 +143,18 @@ impl Obj {
 	}
 
 	fn can_move(&self) -> bool {
-		!matches!(self.kind, ObjKind::Wall)
+		!matches!(self.kind, ObjKind::Wall | ObjKind::Tree)
 	}
+}
+
+enum Ground {
+	Grass,
+	Sapling { stepped_on: bool },
 }
 
 struct Tile {
 	obj: Option<Obj>,
+	ground: Ground,
 }
 
 impl Tile {
@@ -148,7 +162,7 @@ impl Tile {
 	const H: f32 = 80.0;
 
 	fn new() -> Tile {
-		Tile { obj: None }
+		Tile { obj: None, ground: Ground::Grass }
 	}
 }
 
@@ -215,7 +229,7 @@ impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
 		let mut grid = Grid::new();
 		grid.get_mut(Point2::from([3, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
-		grid.get_mut(Point2::from([2, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
+		//grid.get_mut(Point2::from([2, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
 		grid.get_mut(Point2::from([5, 4])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
 		grid.get_mut(Point2::from([5, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
 		grid.get_mut(Point2::from([5, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
@@ -230,8 +244,13 @@ impl Game {
 		grid.get_mut(Point2::from([8, 8])).unwrap().obj = Some(Obj::from_kind(ObjKind::Mirror));
 		grid.get_mut(Point2::from([8, 9])).unwrap().obj =
 			Some(Obj::from_kind(ObjKind::MirrorSlopeDown));
-		grid.get_mut(Point2::from([8, 10])).unwrap().obj =
+		grid.get_mut(Point2::from([4, 11])).unwrap().obj =
+			Some(Obj::from_kind(ObjKind::MirrorSlopeDown));
+		grid.get_mut(Point2::from([8, 11])).unwrap().obj =
 			Some(Obj::from_kind(ObjKind::MirrorSlopeUp));
+		grid.get_mut(Point2::from([10, 10])).unwrap().obj = Some(Obj::from_kind(ObjKind::Tree));
+		grid.get_mut(Point2::from([4, 4])).unwrap().ground = Ground::Sapling { stepped_on: false };
+		grid.get_mut(Point2::from([9, 10])).unwrap().obj = Some(Obj::from_kind(ObjKind::Axe));
 		Ok(Game {
 			grid,
 			rays: vec![],
@@ -262,6 +281,19 @@ impl Game {
 		}
 	}
 
+	fn handle_sapling(&mut self, can_grow: bool) {
+		for tile in self.grid.tiles.iter_mut() {
+			if let Ground::Sapling { stepped_on } = tile.ground {
+				if stepped_on && tile.obj.is_none() && can_grow {
+					tile.ground = Ground::Grass;
+					tile.obj = Some(Obj::from_kind(ObjKind::Tree));
+				} else if (!stepped_on) && tile.obj.is_some() {
+					tile.ground = Ground::Sapling { stepped_on: true };
+				}
+			}
+		}
+	}
+
 	fn obj_move(&mut self, coords: Point2<i32>, direction: IVec2, pushed: bool) {
 		let coords_dst = IVec2::from(coords) + direction;
 		let mut shall_move = false;
@@ -275,6 +307,10 @@ impl Game {
 							if matches!(obj_dst.kind, ObjKind::Soap) {
 								soap_getting_back =
 									self.grid.get_mut(coords_dst.into()).unwrap().obj.take();
+							} else if matches!(obj.kind, ObjKind::Axe)
+								&& matches!(obj_dst.kind, ObjKind::Tree)
+							{
+								self.grid.get_mut(coords_dst.into()).unwrap().obj = None;
 							} else {
 								self.obj_move(coords_dst.into(), direction, true);
 							}
@@ -321,6 +357,8 @@ impl Game {
 				}
 				self.grid.get_mut(coords).unwrap().obj = Some(soap);
 			}
+
+			self.handle_sapling(false);
 		} else if failed_to_move {
 			self
 				.grid
@@ -376,6 +414,8 @@ impl Game {
 				}
 			}
 		}
+
+		self.handle_sapling(true);
 	}
 
 	fn player_shoot(&mut self) {
@@ -507,6 +547,7 @@ impl EventHandler for Game {
 					for index_to_remove in rays_indices_to_remove.into_iter().rev() {
 						self.rays.remove(index_to_remove);
 					}
+					self.handle_sapling(true);
 				}
 			}
 		}
@@ -559,7 +600,7 @@ impl EventHandler for Game {
 			let color = raygun_kind.color();
 			canvas.draw(
 				&graphics::Mesh::new_line(ctx, &[a, b], 10.0, color)?,
-				DrawParam::default().z(3),
+				DrawParam::default().z(4),
 			);
 		}
 
@@ -575,6 +616,23 @@ impl EventHandler for Game {
 					&mut canvas,
 					&self.spritesheet,
 				);
+				if matches!(
+					self
+						.grid
+						.get(Point2::from([grid_x, grid_y]))
+						.unwrap()
+						.ground,
+					Ground::Sapling { .. }
+				) {
+					draw_sprite(
+						Sprite::Sapling,
+						tile_rect(coords),
+						2,
+						Color::WHITE,
+						&mut canvas,
+						&self.spritesheet,
+					);
+				}
 
 				if let Some(obj) = &self.grid.get(Point2::from([grid_x, grid_y])).unwrap().obj {
 					let sprite = match obj.kind {
@@ -587,6 +645,8 @@ impl EventHandler for Game {
 						ObjKind::Mirror => Sprite::Mirror,
 						ObjKind::MirrorSlopeUp => Sprite::MirrorSlopeUp,
 						ObjKind::MirrorSlopeDown => Sprite::MirrorSlopeDown,
+						ObjKind::Tree => Sprite::Tree,
+						ObjKind::Axe => Sprite::Axe,
 					};
 					let color = match obj.kind {
 						ObjKind::Raygun(raygun_kind) => raygun_kind.color(),
@@ -622,7 +682,7 @@ impl EventHandler for Game {
 							Rect::new(window_x, window_y, dst_rect.w, dst_rect.h)
 						},
 					};
-					draw_sprite(sprite, rect, 2, color, &mut canvas, &self.spritesheet);
+					draw_sprite(sprite, rect, 3, color, &mut canvas, &self.spritesheet);
 				}
 			}
 		}

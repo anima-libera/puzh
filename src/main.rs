@@ -53,7 +53,14 @@ impl Sprite {
 	}
 }
 
-fn draw_sprite(sprite: Sprite, dst: Rect, z: i32, canvas: &mut Canvas, spritesheet: &Image) {
+fn draw_sprite(
+	sprite: Sprite,
+	dst: Rect,
+	z: i32,
+	color: Color,
+	canvas: &mut Canvas,
+	spritesheet: &Image,
+) {
 	let mut dst = dst;
 	dst.w /= 8.0;
 	dst.h /= 8.0; // Why is this needed ?
@@ -62,7 +69,8 @@ fn draw_sprite(sprite: Sprite, dst: Rect, z: i32, canvas: &mut Canvas, spriteshe
 		DrawParam::default()
 			.dest_rect(dst)
 			.src(sprite.rect_in_spritesheet())
-			.z(z),
+			.z(z)
+			.color(color),
 	);
 }
 
@@ -80,13 +88,29 @@ enum Animation {
 	},
 }
 
+#[derive(Clone, Copy)]
+enum RaygunKind {
+	SwapWithShooter,
+	DuplicateShootee,
+}
+
+impl RaygunKind {
+	fn color(self) -> Color {
+		match self {
+			RaygunKind::SwapWithShooter => Color::YELLOW,
+			RaygunKind::DuplicateShootee => Color::CYAN,
+		}
+	}
+}
+
+#[derive(Clone, Copy)]
 enum ObjKind {
 	Player,
 	Rock,
 	Wall,
 	Rope,
 	Soap,
-	Raygun,
+	Raygun(RaygunKind),
 }
 
 struct Obj {
@@ -108,7 +132,7 @@ impl Obj {
 			ObjKind::Wall => false,
 			ObjKind::Rope => true,
 			ObjKind::Soap => true,
-			ObjKind::Raygun => true,
+			ObjKind::Raygun(_) => true,
 		}
 	}
 }
@@ -164,6 +188,7 @@ impl Grid {
 
 enum RayAction {
 	SwapWith { with_who_coords: Point2<i32> },
+	Duplicate,
 }
 
 struct Ray {
@@ -194,7 +219,11 @@ impl Game {
 		grid.get_mut(Point2::from([5, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
 		grid.get_mut(Point2::from([5, 7])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rope));
 		grid.get_mut(Point2::from([2, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Soap));
-		grid.get_mut(Point2::from([3, 8])).unwrap().obj = Some(Obj::from_kind(ObjKind::Raygun));
+		grid.get_mut(Point2::from([3, 8])).unwrap().obj =
+			Some(Obj::from_kind(ObjKind::Raygun(RaygunKind::SwapWithShooter)));
+		grid.get_mut(Point2::from([4, 9])).unwrap().obj = Some(Obj::from_kind(ObjKind::Raygun(
+			RaygunKind::DuplicateShootee,
+		)));
 		grid.get_mut(Point2::from([2, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Wall));
 		Ok(Game {
 			grid,
@@ -369,11 +398,16 @@ impl Game {
 								.get(neighboor_coords.into())
 								.and_then(|tile| tile.obj.as_ref())
 							{
-								if matches!(neighboor_obj.kind, ObjKind::Raygun) {
+								if let ObjKind::Raygun(kind) = neighboor_obj.kind {
 									self.rays.push(Ray {
 										coords: neighboor_coords.into(),
 										direction: player_to_neighboor,
-										action: RayAction::SwapWith { with_who_coords: coords },
+										action: match kind {
+											RaygunKind::SwapWithShooter => {
+												RayAction::SwapWith { with_who_coords: coords }
+											},
+											RaygunKind::DuplicateShootee => RayAction::Duplicate,
+										},
 									})
 								}
 							}
@@ -412,6 +446,22 @@ impl EventHandler for Game {
 										let shooter = self.grid.get_mut(with_who_coords).unwrap().obj.take();
 										self.grid.get_mut(dst_coords.into()).unwrap().obj = shooter;
 										self.grid.get_mut(with_who_coords).unwrap().obj = shootee;
+									},
+									RayAction::Duplicate => {
+										rays_indices_to_remove.push(ray_index);
+										let shootee_kind = self
+											.grid
+											.get(dst_coords.into())
+											.unwrap()
+											.obj
+											.as_ref()
+											.unwrap()
+											.kind;
+										let obj_to_be_duplicated_to =
+											&mut self.grid.get_mut(ray.coords).unwrap().obj;
+										if obj_to_be_duplicated_to.is_none() {
+											*obj_to_be_duplicated_to = Some(Obj::from_kind(shootee_kind));
+										}
 									},
 								}
 							} else {
@@ -470,8 +520,13 @@ impl EventHandler for Game {
 			};
 			let a = Vec2::from(center) + ray.direction.as_vec2() * 0.5 * Vec2::new(Tile::W, Tile::H);
 			let b = Vec2::from(center) - ray.direction.as_vec2() * 0.5 * Vec2::new(Tile::W, Tile::H);
+			let raygun_kind = match ray.action {
+				RayAction::SwapWith { .. } => RaygunKind::SwapWithShooter,
+				RayAction::Duplicate => RaygunKind::DuplicateShootee,
+			};
+			let color = raygun_kind.color();
 			canvas.draw(
-				&graphics::Mesh::new_line(ctx, &[a, b], 5.0, Color::YELLOW)?,
+				&graphics::Mesh::new_line(ctx, &[a, b], 10.0, color)?,
 				DrawParam::default().z(3),
 			);
 		}
@@ -484,6 +539,7 @@ impl EventHandler for Game {
 					Sprite::Grass,
 					tile_rect(coords),
 					1,
+					Color::WHITE,
 					&mut canvas,
 					&self.spritesheet,
 				);
@@ -495,7 +551,11 @@ impl EventHandler for Game {
 						ObjKind::Wall => Sprite::Wall,
 						ObjKind::Rope => Sprite::Rope,
 						ObjKind::Soap => Sprite::Soap,
-						ObjKind::Raygun => Sprite::Raygun,
+						ObjKind::Raygun(_) => Sprite::Raygun,
+					};
+					let color = match obj.kind {
+						ObjKind::Raygun(raygun_kind) => raygun_kind.color(),
+						_ => Color::WHITE,
 					};
 					let rect = match obj.animation {
 						Animation::None => tile_rect(coords),
@@ -527,7 +587,7 @@ impl EventHandler for Game {
 							Rect::new(window_x, window_y, dst_rect.w, dst_rect.h)
 						},
 					};
-					draw_sprite(sprite, rect, 2, &mut canvas, &self.spritesheet);
+					draw_sprite(sprite, rect, 2, color, &mut canvas, &self.spritesheet);
 				}
 			}
 		}

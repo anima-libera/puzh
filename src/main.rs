@@ -102,9 +102,14 @@ enum Animation {
 
 #[derive(Clone)]
 enum RaygunKind {
+	/// Swap the shootee with the shooter.
 	SwapWithShooter,
+	/// Spawns a copy of the shootee on the tile the ray is coming from if possible.
 	DuplicateShootee,
+	/// Turns the shootee into the specified object.
 	TurnInto(Box<ObjKind>),
+	/// Turns the shootee *A* into a gun that turns its shootees into *A*.
+	TurnIntoTurnInto,
 }
 
 impl RaygunKind {
@@ -113,6 +118,7 @@ impl RaygunKind {
 			RaygunKind::SwapWithShooter => Color::YELLOW,
 			RaygunKind::DuplicateShootee => Color::CYAN,
 			RaygunKind::TurnInto(_) => Color::WHITE,
+			RaygunKind::TurnIntoTurnInto => Color::new(1.0, 0.6, 0.7, 1.0),
 		}
 	}
 }
@@ -141,6 +147,29 @@ enum ObjKind {
 	Tree,
 	/// Cuts down trees when pushed into them.
 	Axe,
+}
+
+impl ObjKind {
+	fn sprite_and_color(&self) -> (Sprite, Color) {
+		let sprite = match self {
+			ObjKind::Player => Sprite::Player,
+			ObjKind::Rock => Sprite::Rock,
+			ObjKind::Wall => Sprite::Wall,
+			ObjKind::Rope => Sprite::Rope,
+			ObjKind::Soap => Sprite::Soap,
+			ObjKind::Raygun(_) => Sprite::Raygun,
+			ObjKind::Mirror => Sprite::Mirror,
+			ObjKind::MirrorSlopeUp => Sprite::MirrorSlopeUp,
+			ObjKind::MirrorSlopeDown => Sprite::MirrorSlopeDown,
+			ObjKind::Tree => Sprite::Tree,
+			ObjKind::Axe => Sprite::Axe,
+		};
+		let color = match self {
+			ObjKind::Raygun(raygun_kind) => raygun_kind.color(),
+			_ => Color::WHITE,
+		};
+		(sprite, color)
+	}
 }
 
 struct Obj {
@@ -222,6 +251,7 @@ enum RayAction {
 	SwapWith { with_who_coords: Point2<i32> },
 	Duplicate,
 	TurnInto { into_what: ObjKind },
+	TurnIntoTurnInto,
 }
 
 struct Ray {
@@ -259,6 +289,9 @@ impl Game {
 		)));
 		grid.get_mut(Point2::from([2, 9])).unwrap().obj = Some(Obj::from_kind(ObjKind::Raygun(
 			RaygunKind::TurnInto(Box::new(ObjKind::Rock)),
+		)));
+		grid.get_mut(Point2::from([10, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Raygun(
+			RaygunKind::TurnIntoTurnInto,
 		)));
 		grid.get_mut(Point2::from([2, 2])).unwrap().obj = Some(Obj::from_kind(ObjKind::Wall));
 		grid.get_mut(Point2::from([8, 8])).unwrap().obj = Some(Obj::from_kind(ObjKind::Mirror));
@@ -477,6 +510,7 @@ impl Game {
 											RaygunKind::TurnInto(into_what) => {
 												RayAction::TurnInto { into_what: *into_what }
 											},
+											RaygunKind::TurnIntoTurnInto => RayAction::TurnIntoTurnInto,
 										},
 									})
 								}
@@ -564,6 +598,20 @@ impl EventHandler for Game {
 										self.grid.get_mut(dst_coords.into()).unwrap().obj =
 											Some(Obj::from_kind(into_what.clone()));
 									},
+									RayAction::TurnIntoTurnInto => {
+										rays_indices_to_remove.push(ray_index);
+										let shootee = self
+											.grid
+											.get_mut(dst_coords.into())
+											.unwrap()
+											.obj
+											.take()
+											.unwrap();
+										self.grid.get_mut(dst_coords.into()).unwrap().obj =
+											Some(Obj::from_kind(ObjKind::Raygun(RaygunKind::TurnInto(
+												Box::new(shootee.kind),
+											))));
+									},
 								}
 							} else {
 								ray.coords = dst_coords.into();
@@ -628,6 +676,7 @@ impl EventHandler for Game {
 				RayAction::TurnInto { ref into_what } => {
 					RaygunKind::TurnInto(Box::new(into_what.clone()))
 				},
+				RayAction::TurnIntoTurnInto => RaygunKind::TurnIntoTurnInto,
 			};
 			let color = raygun_kind.color();
 			canvas.draw(
@@ -667,23 +716,7 @@ impl EventHandler for Game {
 				}
 
 				if let Some(obj) = &self.grid.get(Point2::from([grid_x, grid_y])).unwrap().obj {
-					let sprite = match obj.kind {
-						ObjKind::Player => Sprite::Player,
-						ObjKind::Rock => Sprite::Rock,
-						ObjKind::Wall => Sprite::Wall,
-						ObjKind::Rope => Sprite::Rope,
-						ObjKind::Soap => Sprite::Soap,
-						ObjKind::Raygun(_) => Sprite::Raygun,
-						ObjKind::Mirror => Sprite::Mirror,
-						ObjKind::MirrorSlopeUp => Sprite::MirrorSlopeUp,
-						ObjKind::MirrorSlopeDown => Sprite::MirrorSlopeDown,
-						ObjKind::Tree => Sprite::Tree,
-						ObjKind::Axe => Sprite::Axe,
-					};
-					let color = match &obj.kind {
-						ObjKind::Raygun(raygun_kind) => raygun_kind.color(),
-						_ => Color::WHITE,
-					};
+					let (sprite, color) = obj.kind.sprite_and_color();
 					let rect = match obj.animation {
 						Animation::None => tile_rect(coords),
 						Animation::CommingFrom { src, time_start, duration } => {
@@ -715,6 +748,36 @@ impl EventHandler for Game {
 						},
 					};
 					draw_sprite(sprite, rect, 3, color, &mut canvas, &self.spritesheet);
+
+					// TurnInto rayguns display what they turn their targets into on them.
+					// This is kinda recursive is they can turn targets into TurnInto guns etc.
+					if let ObjKind::Raygun(RaygunKind::TurnInto(into_what)) = &obj.kind {
+						let size = 4.0 * 8.0;
+						let sub_rect = Rect::new(rect.right() - size, rect.bottom() - size, size, size);
+						let (sprite, color) = into_what.sprite_and_color();
+						draw_sprite(sprite, sub_rect, 4, color, &mut canvas, &self.spritesheet);
+						if let ObjKind::Raygun(RaygunKind::TurnInto(into_what)) = &**into_what {
+							let size = 2.0 * 8.0;
+							let sub_rect =
+								Rect::new(rect.right() - size, rect.bottom() - size, size, size);
+							let (sprite, color) = into_what.sprite_and_color();
+							draw_sprite(sprite, sub_rect, 5, color, &mut canvas, &self.spritesheet);
+							if let ObjKind::Raygun(RaygunKind::TurnInto(into_what)) = &**into_what {
+								let size = 1.0 * 8.0;
+								let sub_rect =
+									Rect::new(rect.right() - size, rect.bottom() - size, size, size);
+								let (sprite, color) = into_what.sprite_and_color();
+								draw_sprite(sprite, sub_rect, 6, color, &mut canvas, &self.spritesheet);
+								if let ObjKind::Raygun(RaygunKind::TurnInto(into_what)) = &**into_what {
+									let size = 0.5 * 8.0;
+									let sub_rect =
+										Rect::new(rect.right() - size, rect.bottom() - size, size, size);
+									let (sprite, color) = into_what.sprite_and_color();
+									draw_sprite(sprite, sub_rect, 7, color, &mut canvas, &self.spritesheet);
+								}
+							}
+						}
+					}
 				}
 			}
 		}

@@ -37,6 +37,7 @@ enum Sprite {
 	Sapling,
 	Tree,
 	Axe,
+	WallWithHoles,
 }
 
 impl Sprite {
@@ -55,6 +56,7 @@ impl Sprite {
 			Sprite::Sapling => (3, 1),
 			Sprite::Tree => (2, 1),
 			Sprite::Axe => (4, 1),
+			Sprite::WallWithHoles => (2, 3),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -147,6 +149,8 @@ enum ObjKind {
 	Tree,
 	/// Cuts down trees when pushed into them.
 	Axe,
+	/// Like a wall but lets rays through.
+	WallWithHoles,
 }
 
 impl ObjKind {
@@ -163,6 +167,7 @@ impl ObjKind {
 			ObjKind::MirrorSlopeDown => Sprite::MirrorSlopeDown,
 			ObjKind::Tree => Sprite::Tree,
 			ObjKind::Axe => Sprite::Axe,
+			ObjKind::WallWithHoles => Sprite::WallWithHoles,
 		};
 		let color = match self {
 			ObjKind::Raygun(raygun_kind) => raygun_kind.color(),
@@ -185,7 +190,10 @@ impl Obj {
 	}
 
 	fn can_move(&self) -> bool {
-		!matches!(self.kind, ObjKind::Wall | ObjKind::Tree)
+		!matches!(
+			self.kind,
+			ObjKind::Wall | ObjKind::Tree | ObjKind::WallWithHoles
+		)
 	}
 }
 
@@ -304,6 +312,8 @@ impl Game {
 		grid.get_mut(Point2::from([10, 10])).unwrap().obj = Some(Obj::from_kind(ObjKind::Tree));
 		grid.get_mut(Point2::from([4, 4])).unwrap().ground = Ground::Sapling { stepped_on: false };
 		grid.get_mut(Point2::from([9, 10])).unwrap().obj = Some(Obj::from_kind(ObjKind::Axe));
+		grid.get_mut(Point2::from([4, 2])).unwrap().obj =
+			Some(Obj::from_kind(ObjKind::WallWithHoles));
 		Ok(Game {
 			grid,
 			rays: vec![],
@@ -542,6 +552,12 @@ impl EventHandler for Game {
 						let dst_coords = IVec2::from(ray.coords) + ray.direction;
 						if let Some(dst_tile) = self.grid.get(dst_coords.into()) {
 							if dst_tile
+								.obj
+								.as_ref()
+								.is_some_and(|obj| matches!(obj.kind, ObjKind::WallWithHoles))
+							{
+								ray.coords = dst_coords.into();
+							} else if dst_tile
 								.obj
 								.as_ref()
 								.is_some_and(|obj| matches!(obj.kind, ObjKind::Mirror))

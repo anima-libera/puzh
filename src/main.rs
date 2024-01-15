@@ -728,6 +728,7 @@ impl Game {
 		self.step_count += 1;
 		self.handle_sapling(true);
 		self.handle_bunnies();
+		self.handle_sapling(true);
 	}
 
 	fn player_shoot(&mut self) {

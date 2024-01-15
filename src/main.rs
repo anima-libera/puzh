@@ -108,7 +108,7 @@ enum Animation {
 	},
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum RaygunKind {
 	/// Swap the shootee with the shooter.
 	SwapWithShooter,
@@ -131,7 +131,7 @@ impl RaygunKind {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 enum ObjKind {
 	/// Moved by arrow keys, can shoot guns. There can be multiple players.
 	Player,
@@ -501,8 +501,8 @@ struct Game {
 
 impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
-		//let level = Level::_test();
-		let level = Level::load_from_text(&std::fs::read_to_string("levels/test04.puzhlvl").unwrap());
+		let level = Level::_test();
+		//let level = Level::load_from_text(&std::fs::read_to_string("levels/test04.puzhlvl").unwrap());
 		let grid = level.grid.clone();
 		Ok(Game {
 			level,
@@ -550,8 +550,55 @@ impl Game {
 		}
 	}
 
-	fn _handle_bunnies(&mut self) {
-		todo!()
+	fn line_of_sights_to(&self, coords: Point2<i32>, to_what: ObjKind) -> Vec<IVec2> {
+		[(1, 0), (0, 1), (-1, 0), (0, -1)]
+			.into_iter()
+			.map(|(dx, dy)| IVec2::from([dx, dy]))
+			.filter(|&direction| {
+				let mut coords = IVec2::from(coords);
+				loop {
+					coords += direction;
+					if let Some(tile) = self.grid.get(coords.into()) {
+						if let Some(obj) = &tile.obj {
+							break obj.kind == to_what;
+						}
+					} else {
+						break false;
+					}
+				}
+			})
+			.collect()
+	}
+
+	fn handle_bunnies(&mut self) {
+		for grid_y in 0..Grid::H {
+			for grid_x in 0..Grid::W {
+				let coords = Point2::from([grid_x, grid_y]);
+				if let Some(obj) = &self.grid.get(coords).unwrap().obj {
+					if obj.kind == ObjKind::Bunny && !obj.processed {
+						let mut scarred_dirs = self.line_of_sights_to(coords, ObjKind::Player);
+						scarred_dirs.retain(|&dir| {
+							let tile = self.grid.get((IVec2::from(coords) - dir).into());
+							tile.is_some_and(|tile| {
+								tile.obj.is_none() || tile.obj.as_ref().is_some_and(|obj| obj.can_move())
+							})
+						});
+						let scarred_dir: IVec2 = scarred_dirs.into_iter().sum();
+						if scarred_dir.x.abs() + scarred_dir.y.abs() == 1 {
+							self
+								.grid
+								.get_mut(coords)
+								.unwrap()
+								.obj
+								.as_mut()
+								.unwrap()
+								.processed = true;
+							self.obj_move(coords, -scarred_dir, false);
+						}
+					}
+				}
+			}
+		}
 	}
 
 	fn obj_move(&mut self, coords: Point2<i32>, direction: IVec2, pushed: bool) {
@@ -595,6 +642,8 @@ impl Game {
 						} else {
 							failed_to_move = true;
 						}
+					} else {
+						failed_to_move = true;
 					}
 				}
 			}
@@ -678,6 +727,7 @@ impl Game {
 
 		self.step_count += 1;
 		self.handle_sapling(true);
+		self.handle_bunnies();
 	}
 
 	fn player_shoot(&mut self) {

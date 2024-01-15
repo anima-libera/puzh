@@ -406,45 +406,71 @@ impl Level {
 						));
 						continue;
 					};
-					let obj = match *obj_descr {
-						"none" => None,
-						"player" => Some(Obj::from_kind(ObjKind::Player)),
-						"rock" => Some(Obj::from_kind(ObjKind::Rock)),
-						"wall" => Some(Obj::from_kind(ObjKind::Wall)),
-						"rope" => Some(Obj::from_kind(ObjKind::Rope)),
-						"soap" => Some(Obj::from_kind(ObjKind::Soap)),
-						"mirror" => Some(Obj::from_kind(ObjKind::Mirror)),
-						"mirror_slope_up" => Some(Obj::from_kind(ObjKind::MirrorSlopeUp)),
-						"mirror_slope_down" => Some(Obj::from_kind(ObjKind::MirrorSlopeDown)),
-						"tree" => Some(Obj::from_kind(ObjKind::Tree)),
-						"axe" => Some(Obj::from_kind(ObjKind::Axe)),
-						"wall_with_holes" => Some(Obj::from_kind(ObjKind::WallWithHoles)),
-						"cheese" => Some(Obj::from_kind(ObjKind::Cheese)),
-						"bunny" => Some(Obj::from_kind(ObjKind::Bunny)),
-						raygun if raygun.starts_with("raygun") => {
-							let raygun_kind = match raygun.split(':').nth(1) {
-								Some("swap") => RaygunKind::SwapWithShooter,
-								Some("duplicate") => RaygunKind::DuplicateShootee,
-								Some("turnintoturninto") => RaygunKind::TurnIntoTurnInto,
-								Some(unknown_kind) => {
-									error_messages.push(format!(
-										"syntax error: unknown raygun kind \"{unknown_kind}\" at line {line_number}"
-									));
-									continue;
-								},
-								None => {
-									error_messages.push(format!(
-										"syntax error: missing raygun model at line {line_number}"
-									));
-									continue;
-								},
-							};
-							Some(Obj::from_kind(ObjKind::Raygun(raygun_kind)))
-						},
-						unknown_obj => {
-							error_messages.push(format!(
-								"syntax error: unknown object \"{unknown_obj}\" at line {line_number}"
-							));
+					fn parse_obj_descr(descr: &str, line_number: usize) -> Result<Option<Obj>, String> {
+						Ok(match descr {
+							"none" => None,
+							"player" => Some(Obj::from_kind(ObjKind::Player)),
+							"rock" => Some(Obj::from_kind(ObjKind::Rock)),
+							"wall" => Some(Obj::from_kind(ObjKind::Wall)),
+							"rope" => Some(Obj::from_kind(ObjKind::Rope)),
+							"soap" => Some(Obj::from_kind(ObjKind::Soap)),
+							"mirror" => Some(Obj::from_kind(ObjKind::Mirror)),
+							"mirror_slope_up" => Some(Obj::from_kind(ObjKind::MirrorSlopeUp)),
+							"mirror_slope_down" => Some(Obj::from_kind(ObjKind::MirrorSlopeDown)),
+							"tree" => Some(Obj::from_kind(ObjKind::Tree)),
+							"axe" => Some(Obj::from_kind(ObjKind::Axe)),
+							"wall_with_holes" => Some(Obj::from_kind(ObjKind::WallWithHoles)),
+							"cheese" => Some(Obj::from_kind(ObjKind::Cheese)),
+							"bunny" => Some(Obj::from_kind(ObjKind::Bunny)),
+							raygun if raygun.starts_with("raygun") => {
+								let raygun_kind = match raygun.split(':').nth(1) {
+									Some("swap") => RaygunKind::SwapWithShooter,
+									Some("duplicate") => RaygunKind::DuplicateShootee,
+									Some("turn_into_turn_into") => RaygunKind::TurnIntoTurnInto,
+									Some("turn_into") => {
+										let index = if let Some((index, _)) = raygun.match_indices(':').nth(1)
+										{
+											index
+										} else {
+											return Err(format!(
+												"syntax error: missing object after \"turn_into\" at line {line_number}"
+											));
+										};
+										let turn_into_what =
+											parse_obj_descr(&raygun[(index + 1)..], line_number)?;
+										let turn_into_what_kind = if let Some(obj) = turn_into_what {
+											obj.kind
+										} else {
+											return Err(format!(
+												"syntax error: \"turn_into\" none is not allowed at line {line_number}"
+											));
+										};
+										RaygunKind::TurnInto(Box::new(turn_into_what_kind))
+									},
+									Some(unknown_kind) => {
+										return Err(format!(
+											"syntax error: unknown raygun kind \"{unknown_kind}\" at line {line_number}"
+										));
+									},
+									None => {
+										return Err(format!(
+											"syntax error: missing raygun model at line {line_number}"
+										));
+									},
+								};
+								Some(Obj::from_kind(ObjKind::Raygun(raygun_kind)))
+							},
+							unknown_obj => {
+								return Err(format!(
+									"syntax error: unknown object \"{unknown_obj}\" at line {line_number}"
+								));
+							},
+						})
+					}
+					let obj = match parse_obj_descr(obj_descr, line_number) {
+						Ok(obj) => obj,
+						Err(error) => {
+							error_messages.push(error);
 							continue;
 						},
 					};
@@ -476,7 +502,7 @@ struct Game {
 impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
 		//let level = Level::_test();
-		let level = Level::load_from_text(&std::fs::read_to_string("levels/test01.puzhlvl").unwrap());
+		let level = Level::load_from_text(&std::fs::read_to_string("levels/test04.puzhlvl").unwrap());
 		let grid = level.grid.clone();
 		Ok(Game {
 			level,

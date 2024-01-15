@@ -1,0 +1,25 @@
+name when the
+grid
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+# #             # # # #
+p               # # #  
+# #     g       # # # #
+# #             # # # #
+# #             # # # #
+# #     r       # # # #
+# #             # # # #
+# #             # # # #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+
+obj space none
+obj # wall
+obj p player
+obj g raygun:turn_into_turn_into
+obj r rope
+obj o wall_with_holes
+obj c cheese
+obj m mirror
+obj 0 rock
+obj s soap

@@ -1,0 +1,27 @@
+name can u get the cheese?
+grid
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+# #         o       m #
+p           o          
+# #         o       m #
+# #         o       m #
+# # G       o   c   m #
+# #         o       m #
+# #         o       m #
+# #         o       m #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+
+obj space none
+obj # wall
+obj p player
+obj g raygun:swap
+obj G raygun:turn_into:player
+obj r rope
+obj o wall_with_holes
+obj c cheese
+obj m mirror
+obj 0 rock
+obj s soap
+obj \ mirror_slope_down

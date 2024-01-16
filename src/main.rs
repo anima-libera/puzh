@@ -306,6 +306,7 @@ struct Level {
 	grid: Grid,
 	name: String,
 	error_messages: Vec<String>,
+	notes: Vec<Note>,
 }
 
 impl Level {
@@ -351,7 +352,14 @@ impl Level {
 		grid.get_mut(Point2::from([7, 5])).unwrap().ground = Ground::Ice;
 		grid.get_mut(Point2::from([8, 5])).unwrap().ground = Ground::Ice;
 
-		Level { grid, name: "test".to_string(), error_messages: vec![] }
+		let notes = vec![Note {
+			coords: Point2::from([2, 4]),
+			text: "uwu".to_string(),
+			scale: 20.0,
+			depth: NoteDepth::Back,
+		}];
+
+		Level { grid, name: "test".to_string(), error_messages: vec![], notes }
 	}
 
 	fn load_from_text(text: &str) -> Level {
@@ -359,6 +367,7 @@ impl Level {
 		let mut chars_to_coords: HashMap<char, Vec<Point2<i32>>> = HashMap::new();
 		let mut name = "name".to_string();
 		let mut error_messages = vec![];
+		let mut notes = vec![];
 		let mut lines = text.lines().enumerate();
 		while let Some((line_index, line)) = lines.next() {
 			let line_number = line_index + 1;
@@ -523,7 +532,7 @@ impl Level {
 						word
 					} else {
 						error_messages.push(format!(
-							"syntax error: missing griund description after \"ground\" at line {line_number}"
+							"syntax error: missing ground description after \"ground\" at line {line_number}"
 						));
 						continue;
 					};
@@ -544,38 +553,128 @@ impl Level {
 						}
 					}
 				},
+				"note" => {
+					let x: i32 = if let Some(word) = words.get(1) {
+						match word.parse() {
+							Ok(value) => value,
+							Err(error) => {
+								error_messages.push(format!(
+									"syntax error: x coordinate parsing failed at line {line_number}: {error}"
+								));
+								continue;
+							},
+						}
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing x coordinate at line {line_number}"
+						));
+						continue;
+					};
+					let y: i32 = if let Some(word) = words.get(2) {
+						match word.parse() {
+							Ok(value) => value,
+							Err(error) => {
+								error_messages.push(format!(
+									"syntax error: y coordinate parsing failed at line {line_number}: {error}"
+								));
+								continue;
+							},
+						}
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing y coordinate at line {line_number}"
+						));
+						continue;
+					};
+					let coords = Point2::from([x, y]);
+					let scale: f32 = if let Some(word) = words.get(3) {
+						match word.parse() {
+							Ok(value) => value,
+							Err(error) => {
+								error_messages.push(format!(
+									"syntax error: scale parsing failed at line {line_number}: {error}"
+								));
+								continue;
+							},
+						}
+					} else {
+						error_messages.push(format!("syntax error: missing scale at line {line_number}"));
+						continue;
+					};
+					let depth: NoteDepth = match words.get(4) {
+						Some(&"front") => NoteDepth::Front,
+						Some(&"back") => NoteDepth::Back,
+						Some(unknown_depth) => {
+							error_messages.push(format!(
+									"syntax error: found \"{unknown_depth}\" instead of front or back at line {line_number}"
+								));
+							continue;
+						},
+						None => {
+							error_messages.push(format!(
+								"syntax error: missing front/back at line {line_number}"
+							));
+							continue;
+						},
+					};
+					let text = words[5..].join(" ").replace(';', "\n").replace("\n\n", ";");
+					notes.push(Note { coords, text, scale, depth })
+				},
 				unknown_word => error_messages.push(format!(
 					"syntax error: unknown \"{unknown_word}\" at line {line_number}"
 				)),
 			}
 		}
-		Level { grid, name, error_messages }
+		Level { grid, name, error_messages, notes }
 	}
+}
+
+#[derive(Clone)]
+enum NoteDepth {
+	Front,
+	Back,
+}
+
+#[derive(Clone)]
+struct Note {
+	coords: Point2<i32>,
+	text: String,
+	scale: f32,
+	depth: NoteDepth,
 }
 
 struct Game {
 	level: Level,
 	grid: Grid,
+	notes: Vec<Note>,
 	rays: Vec<Ray>,
 	rays_animation: Option<RaysAnimation>,
 	spritesheet: Image,
 	cheese_count: u32,
+	cheese_count_got_here: u32,
 	step_count: u32,
+	step_count_at_level_start: u32,
+	reset_count: u32,
 }
 
 impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
 		//let level = Level::_test();
-		let level = Level::load_from_text(&std::fs::read_to_string("levels/test05.puzhlvl").unwrap());
+		let level = Level::load_from_text(&std::fs::read_to_string("levels/test06.puzhlvl").unwrap());
 		let grid = level.grid.clone();
+		let notes = level.notes.clone();
 		Ok(Game {
 			level,
 			grid,
+			notes,
 			rays: vec![],
 			rays_animation: None,
 			spritesheet: Image::from_bytes(ctx, include_bytes!("../assets/spritesheet.png"))?,
 			cheese_count: 0,
+			cheese_count_got_here: 0,
 			step_count: 0,
+			step_count_at_level_start: 0,
+			reset_count: 0,
 		})
 	}
 
@@ -698,7 +797,7 @@ impl Game {
 								&& matches!(obj_dst.kind, ObjKind::Cheese)
 							{
 								self.grid.get_mut(coords_dst.into()).unwrap().obj = None;
-								self.cheese_count += 1;
+								self.cheese_count_got_here += 1;
 							} else if matches!(obj.kind, ObjKind::Key)
 								&& matches!(obj_dst.kind, ObjKind::Door)
 							{
@@ -987,6 +1086,9 @@ impl EventHandler for Game {
 			Some(VirtualKeyCode::R) => {
 				self.rays = vec![];
 				self.grid = self.level.grid.clone();
+				self.cheese_count_got_here = 0;
+				self.step_count = self.step_count_at_level_start;
+				self.reset_count += 1;
 			},
 			Some(VirtualKeyCode::Up) if can_play => self.player_move(IVec2::from([0, -1])),
 			Some(VirtualKeyCode::Down) if can_play => self.player_move(IVec2::from([0, 1])),
@@ -1150,6 +1252,24 @@ impl EventHandler for Game {
 			}
 		}
 
+		for note in self.notes.iter() {
+			let mut text = graphics::Text::new(&note.text);
+			text.set_scale(note.scale);
+			let offset = Vec2::from([note.coords.x as f32, note.coords.y as f32])
+				* Vec2::from([Tile::W, Tile::H]);
+			let z = match note.depth {
+				NoteDepth::Front => 3,
+				NoteDepth::Back => 2,
+			};
+			canvas.draw(
+				&text,
+				DrawParam::default()
+					.z(z)
+					.color(Color::BLACK)
+					.offset(-offset),
+			);
+		}
+
 		let mut text_y = 0.0;
 		{
 			let mut text = graphics::Text::new(&self.level.name);
@@ -1160,16 +1280,25 @@ impl EventHandler for Game {
 				DrawParam::default()
 					.z(8)
 					.color(Color::BLACK)
-					.offset(Vec2::from([0.0, text_y])),
+					.offset(-Vec2::from([0.0, text_y])),
 			);
-			text_y -= scale;
+			text_y += scale;
 		}
 
-		if self.cheese_count >= 1 {
+		if self.cheese_count + self.cheese_count_got_here >= 1 {
 			let cheese_text = format!(
-				"{} cheese{}",
+				"{}{} cheese{}",
 				self.cheese_count,
-				if self.cheese_count >= 2 { "s" } else { "" }
+				if self.cheese_count_got_here >= 1 {
+					format!("+{}?", self.cheese_count_got_here)
+				} else {
+					"".to_string()
+				},
+				if self.cheese_count + self.cheese_count_got_here >= 2 {
+					"s"
+				} else {
+					""
+				}
 			);
 			let mut text = graphics::Text::new(cheese_text);
 			let scale = 30.0;
@@ -1179,9 +1308,9 @@ impl EventHandler for Game {
 				DrawParam::default()
 					.z(8)
 					.color(Color::BLACK)
-					.offset(Vec2::from([0.0, text_y])),
+					.offset(-Vec2::from([0.0, text_y])),
 			);
-			text_y -= scale;
+			text_y += scale;
 		}
 
 		{
@@ -1193,9 +1322,9 @@ impl EventHandler for Game {
 				DrawParam::default()
 					.z(8)
 					.color(Color::BLACK)
-					.offset(Vec2::from([0.0, text_y])),
+					.offset(-Vec2::from([0.0, text_y])),
 			);
-			text_y -= scale;
+			text_y += scale;
 		}
 
 		for error_message in self.level.error_messages.iter() {
@@ -1207,9 +1336,9 @@ impl EventHandler for Game {
 				DrawParam::default()
 					.z(8)
 					.color(Color::new(0.6, 0.0, 0.0, 1.0))
-					.offset(Vec2::from([0.0, text_y])),
+					.offset(-Vec2::from([0.0, text_y])),
 			);
-			text_y -= scale;
+			text_y += scale;
 		}
 
 		canvas.finish(ctx)?;

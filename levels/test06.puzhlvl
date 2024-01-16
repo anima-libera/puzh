@@ -1,0 +1,34 @@
+name door gun
+grid
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+# #             # # # #
+p         G     #      
+# #             # #   #
+# #             # #   #
+# #   k k k k k d     #
+# # # # # # # # # # d #
+# # # # # # # # # #   #
+# c d         #       #
+#     # k         # # #
+# # # # # # # # # # # #
+note 7 5 15.0 back ; ; ; ; keys ^^
+note 1 8 15.0 front ; ; ; ;how cheese
+
+obj space none
+obj # wall
+obj p player
+obj g raygun:swap
+obj G raygun:turn_into:door
+obj r rope
+obj o wall_with_holes
+obj c cheese
+obj m mirror
+obj 0 rock
+obj s soap
+obj \ mirror_slope_down
+obj b bunny
+obj k key
+obj d door
+ground . ice
+ground , sapling

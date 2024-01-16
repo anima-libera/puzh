@@ -41,6 +41,8 @@ enum Sprite {
 	WallWithHoles,
 	Cheese,
 	Bunny,
+	Door,
+	Key,
 }
 
 impl Sprite {
@@ -62,6 +64,8 @@ impl Sprite {
 			Sprite::WallWithHoles => (2, 3),
 			Sprite::Cheese => (0, 1),
 			Sprite::Bunny => (0, 3),
+			Sprite::Door => (8, 0),
+			Sprite::Key => (7, 0),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -161,6 +165,10 @@ enum ObjKind {
 	Cheese,
 	/// Moves away from the player if it has line of sight. It is shy. Bnuuy.
 	Bunny,
+	/// Like a wall but can be opened by a key.
+	Door,
+	/// Can open a door (once).
+	Key,
 }
 
 impl ObjKind {
@@ -180,6 +188,8 @@ impl ObjKind {
 			ObjKind::WallWithHoles => Sprite::WallWithHoles,
 			ObjKind::Cheese => Sprite::Cheese,
 			ObjKind::Bunny => Sprite::Bunny,
+			ObjKind::Door => Sprite::Door,
+			ObjKind::Key => Sprite::Key,
 		};
 		let color = match self {
 			ObjKind::Raygun(raygun_kind) => raygun_kind.color(),
@@ -205,7 +215,7 @@ impl Obj {
 	fn can_move(&self) -> bool {
 		!matches!(
 			self.kind,
-			ObjKind::Wall | ObjKind::Tree | ObjKind::WallWithHoles
+			ObjKind::Wall | ObjKind::Tree | ObjKind::WallWithHoles | ObjKind::Door
 		)
 	}
 }
@@ -331,6 +341,8 @@ impl Level {
 			Some(Obj::from_kind(ObjKind::WallWithHoles));
 		grid.get_mut(Point2::from([10, 4])).unwrap().obj = Some(Obj::from_kind(ObjKind::Cheese));
 		grid.get_mut(Point2::from([10, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Bunny));
+		grid.get_mut(Point2::from([6, 1])).unwrap().obj = Some(Obj::from_kind(ObjKind::Key));
+		grid.get_mut(Point2::from([8, 1])).unwrap().obj = Some(Obj::from_kind(ObjKind::Door));
 
 		Level { grid, name: "test".to_string(), error_messages: vec![] }
 	}
@@ -422,6 +434,8 @@ impl Level {
 							"wall_with_holes" => Some(Obj::from_kind(ObjKind::WallWithHoles)),
 							"cheese" => Some(Obj::from_kind(ObjKind::Cheese)),
 							"bunny" => Some(Obj::from_kind(ObjKind::Bunny)),
+							"door" => Some(Obj::from_kind(ObjKind::Door)),
+							"key" => Some(Obj::from_kind(ObjKind::Key)),
 							raygun if raygun.starts_with("raygun") => {
 								let raygun_kind = match raygun.split(':').nth(1) {
 									Some("swap") => RaygunKind::SwapWithShooter,
@@ -502,7 +516,7 @@ struct Game {
 impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
 		let level = Level::_test();
-		//let level = Level::load_from_text(&std::fs::read_to_string("levels/test04.puzhlvl").unwrap());
+		//let level = Level::load_from_text(&std::fs::read_to_string("levels/test05.puzhlvl").unwrap());
 		let grid = level.grid.clone();
 		Ok(Game {
 			level,
@@ -606,6 +620,7 @@ impl Game {
 		let mut shall_move = false;
 		let mut failed_to_move = false;
 		let mut soap_getting_back = None;
+		let mut key_got_in_door = false;
 		if let Some(tile) = self.grid.get(coords) {
 			if let Some(obj) = &tile.obj {
 				if obj.can_move() {
@@ -623,6 +638,12 @@ impl Game {
 							{
 								self.grid.get_mut(coords_dst.into()).unwrap().obj = None;
 								self.cheese_count += 1;
+							} else if matches!(obj.kind, ObjKind::Key)
+								&& matches!(obj_dst.kind, ObjKind::Door)
+							{
+								self.grid.get_mut(coords).unwrap().obj = None;
+								self.grid.get_mut(coords_dst.into()).unwrap().obj = None;
+								key_got_in_door = true;
 							} else {
 								self.obj_move(coords_dst.into(), direction, true);
 							}
@@ -650,7 +671,7 @@ impl Game {
 		}
 
 		let mut obj_is_rope = false;
-		if shall_move {
+		if shall_move && !key_got_in_door {
 			let mut obj = self.grid.get_mut(coords).unwrap().obj.take();
 			obj.as_mut().unwrap().moved = true;
 			obj.as_mut().unwrap().animation = Animation::CommingFrom {

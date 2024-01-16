@@ -1,0 +1,28 @@
+name this one is bad sowy i dont know what im doing >_<'
+grid
+# # # # # # # # # # # #
+# # # # # # # # # #   #
+# #               o   #
+p                 o    
+# # s s s s s s   0 # #
+# # b b b b b b     # #
+#                   # #
+#   # # #   # # # o # #
+#         g         # #
+# #                 # #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+
+obj space none
+obj # wall
+obj p player
+obj g raygun:swap
+obj G raygun:turn_into:player
+obj r rope
+obj o wall_with_holes
+obj c cheese
+obj m mirror
+obj 0 rock
+obj s soap
+obj \ mirror_slope_down
+obj b bunny

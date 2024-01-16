@@ -43,6 +43,7 @@ enum Sprite {
 	Bunny,
 	Door,
 	Key,
+	Ice,
 }
 
 impl Sprite {
@@ -66,6 +67,7 @@ impl Sprite {
 			Sprite::Bunny => (0, 3),
 			Sprite::Door => (8, 0),
 			Sprite::Key => (7, 0),
+			Sprite::Ice => (1, 3),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -222,11 +224,12 @@ impl Obj {
 
 #[derive(Clone)]
 enum Ground {
+	/// Default floor, nothing special.
 	Grass,
 	/// A sapling can be stepped on, then it will grow a tree when it can.
-	Sapling {
-		stepped_on: bool,
-	},
+	Sapling { stepped_on: bool },
+	/// Stuff pushed on ice slides until it cannot coninue further or no more ice.
+	Ice,
 }
 
 #[derive(Clone)]
@@ -343,6 +346,10 @@ impl Level {
 		grid.get_mut(Point2::from([10, 6])).unwrap().obj = Some(Obj::from_kind(ObjKind::Bunny));
 		grid.get_mut(Point2::from([6, 1])).unwrap().obj = Some(Obj::from_kind(ObjKind::Key));
 		grid.get_mut(Point2::from([8, 1])).unwrap().obj = Some(Obj::from_kind(ObjKind::Door));
+		grid.get_mut(Point2::from([7, 4])).unwrap().ground = Ground::Ice;
+		grid.get_mut(Point2::from([8, 4])).unwrap().ground = Ground::Ice;
+		grid.get_mut(Point2::from([7, 5])).unwrap().ground = Ground::Ice;
+		grid.get_mut(Point2::from([8, 5])).unwrap().ground = Ground::Ice;
 
 		Level { grid, name: "test".to_string(), error_messages: vec![] }
 	}
@@ -494,6 +501,49 @@ impl Level {
 						}
 					}
 				},
+				"ground" => {
+					let character = if let Some(word) = words.get(1) {
+						if *word == "space" {
+							' '
+						} else if word.len() == 1 {
+							word.chars().next().unwrap()
+						} else {
+							error_messages.push(format!(
+								"syntax error: should be a single character after \"ground\" at line {line_number}"
+							));
+							continue;
+						}
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing character after \"ground\" at line {line_number}"
+						));
+						continue;
+					};
+					let ground_descr = if let Some(word) = words.get(2) {
+						word
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing griund description after \"ground\" at line {line_number}"
+						));
+						continue;
+					};
+					let ground = match *ground_descr {
+						"grass" => Ground::Grass,
+						"sapling" => Ground::Sapling { stepped_on: false },
+						"ice" => Ground::Ice,
+						unknown_obj => {
+							error_messages.push(format!(
+								"syntax error: unknown object \"{unknown_obj}\" at line {line_number}"
+							));
+							continue;
+						},
+					};
+					if let Some(coords_list) = chars_to_coords.get(&character) {
+						for coords in coords_list {
+							grid.get_mut(*coords).unwrap().ground = ground.clone();
+						}
+					}
+				},
 				unknown_word => error_messages.push(format!(
 					"syntax error: unknown \"{unknown_word}\" at line {line_number}"
 				)),
@@ -515,8 +565,8 @@ struct Game {
 
 impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
-		let level = Level::_test();
-		//let level = Level::load_from_text(&std::fs::read_to_string("levels/test05.puzhlvl").unwrap());
+		//let level = Level::_test();
+		let level = Level::load_from_text(&std::fs::read_to_string("levels/test05.puzhlvl").unwrap());
 		let grid = level.grid.clone();
 		Ok(Game {
 			level,
@@ -616,7 +666,18 @@ impl Game {
 	}
 
 	fn obj_move(&mut self, coords: Point2<i32>, direction: IVec2, pushed: bool) {
-		let coords_dst = IVec2::from(coords) + direction;
+		let mut coords_dst = IVec2::from(coords) + direction;
+		while self
+			.grid
+			.get(coords_dst.into())
+			.is_some_and(|tile| tile.obj.is_none() && matches!(tile.ground, Ground::Ice))
+			&& self
+				.grid
+				.get((coords_dst + direction).into())
+				.is_some_and(|tile| tile.obj.is_none())
+		{
+			coords_dst += direction;
+		}
 		let mut shall_move = false;
 		let mut failed_to_move = false;
 		let mut soap_getting_back = None;
@@ -978,30 +1039,48 @@ impl EventHandler for Game {
 			for grid_x in 0..Grid::W {
 				let coords = Point2::from([grid_x, grid_y]);
 
-				draw_sprite(
-					Sprite::Grass,
-					tile_rect(coords),
-					1,
-					Color::WHITE,
-					&mut canvas,
-					&self.spritesheet,
-				);
 				if matches!(
 					self
 						.grid
 						.get(Point2::from([grid_x, grid_y]))
 						.unwrap()
 						.ground,
-					Ground::Sapling { .. }
+					Ground::Ice
 				) {
 					draw_sprite(
-						Sprite::Sapling,
+						Sprite::Ice,
 						tile_rect(coords),
-						2,
+						1,
 						Color::WHITE,
 						&mut canvas,
 						&self.spritesheet,
 					);
+				} else {
+					draw_sprite(
+						Sprite::Grass,
+						tile_rect(coords),
+						1,
+						Color::WHITE,
+						&mut canvas,
+						&self.spritesheet,
+					);
+					if matches!(
+						self
+							.grid
+							.get(Point2::from([grid_x, grid_y]))
+							.unwrap()
+							.ground,
+						Ground::Sapling { .. }
+					) {
+						draw_sprite(
+							Sprite::Sapling,
+							tile_rect(coords),
+							2,
+							Color::WHITE,
+							&mut canvas,
+							&self.spritesheet,
+						);
+					}
 				}
 
 				if let Some(obj) = &self.grid.get(Point2::from([grid_x, grid_y])).unwrap().obj {

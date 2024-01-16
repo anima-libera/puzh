@@ -2,11 +2,11 @@ name this one is bad sowy i dont know what im doing >_<'
 grid
 # # # # # # # # # # # #
 # # # # # # # # # #   #
-# #               o   #
+# #   . . .       o   #
 p                 o    
 # # s s s s s s   0 # #
 # # b b b b b b     # #
-#                   # #
+#   , , ,           # #
 #   # # #   # # # o # #
 #         g         # #
 # #                 # #
@@ -26,3 +26,5 @@ obj 0 rock
 obj s soap
 obj \ mirror_slope_down
 obj b bunny
+ground . ice
+ground , sapling

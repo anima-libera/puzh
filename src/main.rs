@@ -93,6 +93,9 @@ fn draw_sprite(
 	let mut dst = dst;
 	dst.w /= 8.0;
 	dst.h /= 8.0; // Why is this needed ?
+	if rotation != 0.0 {
+		println!("warning: rotated sprites is broken for now");
+	}
 	canvas.draw(
 		spritesheet,
 		DrawParam::default()
@@ -1384,12 +1387,19 @@ impl EventHandler for Game {
 				}
 
 				if let Some(exit) = &self.grid.get(Point2::from([grid_x, grid_y])).unwrap().exit {
+					let rotation = match exit.direction {
+						IVec2 { x: 1, y: 0 } => 0.0,
+						IVec2 { x: 0, y: -1 } => 1.0,
+						IVec2 { x: -1, y: 0 } => 2.0,
+						IVec2 { x: 0, y: 1 } => 3.0,
+						_ => panic!(),
+					};
 					draw_sprite(
 						Sprite::Arrow,
 						tile_rect(coords),
 						2,
 						Color::new(0.8, 0.8, 0.8, 1.0),
-						0.0,
+						rotation,
 						&mut canvas,
 						&self.spritesheet,
 					);

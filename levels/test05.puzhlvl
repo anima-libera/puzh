@@ -1,9 +1,10 @@
 name this one is bad sowy i dont know what im doing >_<'
+id test05
 grid
 # # # # # # # # # # # #
 # # # # # # # # # #   #
 # #   . . .       o   #
-p                 o    
+@                 o   %
 # # s s s s s s   0 # #
 # # b b b b b b     # #
 #   , , ,           # #
@@ -12,6 +13,9 @@ p                 o
 # #                 # #
 # # # # # # # # # # # #
 # # # # # # # # # # # #
+entry @ right
+exit % right test06
+
 note 2 2 20.0 back jaaj;uwu
 
 obj space none

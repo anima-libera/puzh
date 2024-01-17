@@ -1,9 +1,10 @@
 name door gun
+id test06
 grid
 # # # # # # # # # # # #
 # # # # # # # # # # # #
 # #             # # # #
-p         G     #      
+@         G     #     %
 # #             # #   #
 # #             # #   #
 # #   k k k k k d     #
@@ -12,6 +13,9 @@ p         G     #
 # c d         #       #
 #     # k         # # #
 # # # # # # # # # # # #
+entry @ right
+exit % right test
+
 note 7 5 15.0 back ; ; ; ; keys ^^
 note 1 8 15.0 front ; ; ; ;how cheese
 

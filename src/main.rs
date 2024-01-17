@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::f32::consts::TAU;
 use std::time::{Duration, Instant};
 
 use ggez::conf::{WindowMode, WindowSetup};
@@ -44,6 +45,7 @@ enum Sprite {
 	Door,
 	Key,
 	Ice,
+	Arrow,
 }
 
 impl Sprite {
@@ -68,6 +70,7 @@ impl Sprite {
 			Sprite::Door => (8, 0),
 			Sprite::Key => (7, 0),
 			Sprite::Ice => (1, 3),
+			Sprite::Arrow => (2, 4),
 		};
 		Rect::new(
 			x as f32 * 8.0 / 128.0,
@@ -83,6 +86,7 @@ fn draw_sprite(
 	dst: Rect,
 	z: i32,
 	color: Color,
+	rotation: f32,
 	canvas: &mut Canvas,
 	spritesheet: &Image,
 ) {
@@ -95,7 +99,8 @@ fn draw_sprite(
 			.dest_rect(dst)
 			.src(sprite.rect_in_spritesheet())
 			.z(z)
-			.color(color),
+			.color(color)
+			.rotation(TAU * (rotation / 4.0)),
 	);
 }
 
@@ -233,9 +238,16 @@ enum Ground {
 }
 
 #[derive(Clone)]
+struct Exit {
+	direction: IVec2,
+	dst_level_id: String,
+}
+
+#[derive(Clone)]
 struct Tile {
 	obj: Option<Obj>,
 	ground: Ground,
+	exit: Option<Exit>,
 }
 
 impl Tile {
@@ -243,7 +255,7 @@ impl Tile {
 	const H: f32 = 80.0;
 
 	fn new() -> Tile {
-		Tile { obj: None, ground: Ground::Grass }
+		Tile { obj: None, ground: Ground::Grass, exit: None }
 	}
 }
 
@@ -302,17 +314,21 @@ struct RaysAnimation {
 	duration: Duration,
 }
 
+#[derive(Clone)]
 struct Level {
 	grid: Grid,
+	id: String,
 	name: String,
 	error_messages: Vec<String>,
 	notes: Vec<Note>,
+	entry_coords: Point2<i32>,
+	entry_direction: IVec2,
 }
 
 impl Level {
-	fn _test() -> Level {
+	fn test() -> Level {
 		let mut grid = Grid::new();
-		grid.get_mut(Point2::from([3, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
+		//grid.get_mut(Point2::from([3, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
 		//grid.get_mut(Point2::from([2, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
 		grid.get_mut(Point2::from([5, 4])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
 		grid.get_mut(Point2::from([5, 5])).unwrap().obj = Some(Obj::from_kind(ObjKind::Rock));
@@ -359,16 +375,27 @@ impl Level {
 			depth: NoteDepth::Back,
 		}];
 
-		Level { grid, name: "test".to_string(), error_messages: vec![], notes }
+		Level {
+			grid,
+			id: "test".to_string(),
+			name: "test".to_string(),
+			error_messages: vec![],
+			notes,
+			entry_coords: [3, 5].into(),
+			entry_direction: (0, -1).into(),
+		}
 	}
 
 	fn load_from_text(text: &str) -> Level {
 		let mut grid = Grid::new();
 		let mut chars_to_coords: HashMap<char, Vec<Point2<i32>>> = HashMap::new();
 		let mut name = "name".to_string();
+		let mut id = None;
 		let mut error_messages = vec![];
 		let mut notes = vec![];
 		let mut lines = text.lines().enumerate();
+		let mut entry_coords = [0, 0].into();
+		let mut entry_direction = (1, 0).into();
 		while let Some((line_index, line)) = lines.next() {
 			let line_number = line_index + 1;
 			let words: Vec<_> = line.split_ascii_whitespace().collect();
@@ -382,6 +409,15 @@ impl Level {
 					} else {
 						error_messages.push(format!(
 							"syntax error: missing name argument at line {line_number}"
+						));
+					}
+				},
+				"id" => {
+					if words.len() >= 2 {
+						id = Some(words[1..].join(" ").to_string());
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing id argument at line {line_number}"
 						));
 					}
 				},
@@ -472,7 +508,7 @@ impl Level {
 											obj.kind
 										} else {
 											return Err(format!(
-												"syntax error: \"turn_into\" none is not allowed at line {line_number}"
+												"structural error: \"turn_into\" none is not allowed at line {line_number}"
 											));
 										};
 										RaygunKind::TurnInto(Box::new(turn_into_what_kind))
@@ -553,6 +589,108 @@ impl Level {
 						}
 					}
 				},
+				"entry" => {
+					let character = if let Some(word) = words.get(1) {
+						if *word == "space" {
+							' '
+						} else if word.len() == 1 {
+							word.chars().next().unwrap()
+						} else {
+							error_messages.push(format!(
+								"syntax error: should be a single character after \"entry\" at line {line_number}"
+							));
+							continue;
+						}
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing character after \"entry\" at line {line_number}"
+						));
+						continue;
+					};
+					if let Some(coords_list) = chars_to_coords.get(&character) {
+						if coords_list.len() >= 2 {
+							error_messages.push("structural error: too many entries".to_string());
+							continue;
+						}
+						let coords = coords_list[0];
+						let direction = if let Some(word) = words.get(2) {
+							match *word {
+								"right" => (1, 0).into(),
+								"left" => (-1, 0).into(),
+								"up" => (0, -1).into(),
+								"down" => (0, 1).into(),
+								unknown_direction => {
+									error_messages.push(format!(
+										"syntax error: unkonwn direction \"{unknown_direction}\" after \"entry\" at line {line_number}"
+									));
+									continue;
+								},
+							}
+						} else {
+							error_messages.push(format!(
+								"syntax error: missing direction after \"entry\" at line {line_number}"
+							));
+							continue;
+						};
+						entry_coords = coords;
+						entry_direction = direction;
+					} else {
+						error_messages.push("structural error: no entry".to_string());
+						continue;
+					}
+				},
+				"exit" => {
+					let character = if let Some(word) = words.get(1) {
+						if *word == "space" {
+							' '
+						} else if word.len() == 1 {
+							word.chars().next().unwrap()
+						} else {
+							error_messages.push(format!(
+								"syntax error: should be a single character after \"exit\" at line {line_number}"
+							));
+							continue;
+						}
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing character after \"exit\" at line {line_number}"
+						));
+						continue;
+					};
+					let direction = if let Some(word) = words.get(2) {
+						match *word {
+							"right" => (1, 0).into(),
+							"left" => (-1, 0).into(),
+							"up" => (0, -1).into(),
+							"down" => (0, 1).into(),
+							unknown_direction => {
+								error_messages.push(format!(
+									"syntax error: unkonwn direction \"{unknown_direction}\" after \"exit\" at line {line_number}"
+								));
+								continue;
+							},
+						}
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing direction after \"exit\" at line {line_number}"
+						));
+						continue;
+					};
+					let dst_level_id = if let Some(word) = words.get(3) {
+						word.to_string()
+					} else {
+						error_messages.push(format!(
+							"syntax error: missing destination level id after \"exit\" at line {line_number}"
+						));
+						continue;
+					};
+					if let Some(coords_list) = chars_to_coords.get(&character) {
+						for coords in coords_list {
+							grid.get_mut(*coords).unwrap().exit =
+								Some(Exit { direction, dst_level_id: dst_level_id.clone() })
+						}
+					}
+				},
 				"note" => {
 					let x: i32 = if let Some(word) = words.get(1) {
 						match word.parse() {
@@ -625,7 +763,16 @@ impl Level {
 				)),
 			}
 		}
-		Level { grid, name, error_messages, notes }
+		let id = id.expect("msising id in level file");
+		Level {
+			grid,
+			id,
+			name,
+			error_messages,
+			notes,
+			entry_coords,
+			entry_direction,
+		}
 	}
 }
 
@@ -644,6 +791,7 @@ struct Note {
 }
 
 struct Game {
+	all_levels: HashMap<String, Level>,
 	level: Level,
 	grid: Grid,
 	notes: Vec<Note>,
@@ -659,11 +807,22 @@ struct Game {
 
 impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
-		//let level = Level::_test();
-		let level = Level::load_from_text(&std::fs::read_to_string("levels/test06.puzhlvl").unwrap());
+		let mut all_levels = HashMap::new();
+		let test_level = Level::test();
+		all_levels.insert(test_level.id.clone(), test_level);
+		for level_file in std::fs::read_dir("levels").unwrap() {
+			let level_file = level_file.unwrap();
+			let level_text = std::fs::read_to_string(level_file.path()).unwrap();
+			let level = Level::load_from_text(&level_text);
+			let level_id = level.id.clone();
+			all_levels.insert(level_id, level);
+		}
+		let level_id = "test01";
+		let level = all_levels.get(level_id).unwrap().clone();
 		let grid = level.grid.clone();
 		let notes = level.notes.clone();
-		Ok(Game {
+		let mut game = Game {
+			all_levels,
 			level,
 			grid,
 			notes,
@@ -675,7 +834,9 @@ impl Game {
 			step_count: 0,
 			step_count_at_level_start: 0,
 			reset_count: 0,
-		})
+		};
+		game.go_to_level(level_id);
+		Ok(game)
 	}
 
 	fn clear_processed_flags(&mut self) {
@@ -783,6 +944,15 @@ impl Game {
 		let mut key_got_in_door = false;
 		if let Some(tile) = self.grid.get(coords) {
 			if let Some(obj) = &tile.obj {
+				if obj.kind == ObjKind::Player {
+					if let Some(exit) = &tile.exit {
+						if direction == exit.direction {
+							let dst_level_id = exit.dst_level_id.clone();
+							self.go_to_level(&dst_level_id);
+							return;
+						}
+					}
+				}
 				if obj.can_move() {
 					if let Some(tile_dst) = self.grid.get(coords_dst.into()) {
 						if let Some(obj_dst) = &tile_dst.obj {
@@ -880,6 +1050,31 @@ impl Game {
 				self.obj_move(coords_maybe_pulled.into(), direction, false);
 			}
 		}
+	}
+
+	fn go_to_level(&mut self, level_id: &str) {
+		let new_level = self.all_levels.get(level_id).unwrap().clone();
+		self.cheese_count += self.cheese_count_got_here;
+		self.cheese_count_got_here = 0;
+		self.step_count_at_level_start = self.step_count;
+		self.level = new_level;
+		self.grid = self.level.grid.clone();
+		self.rays = vec![];
+		let entry_coords = self.level.entry_coords;
+		let entry_direction = self.level.entry_direction;
+		self.grid.get_mut(entry_coords).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
+		self
+			.grid
+			.get_mut(entry_coords)
+			.unwrap()
+			.obj
+			.as_mut()
+			.unwrap()
+			.animation = Animation::CommingFrom {
+			src: (IVec2::from(entry_coords) - entry_direction).into(),
+			time_start: Instant::now(),
+			duration: Duration::from_secs_f32(0.05),
+		};
 	}
 
 	fn player_move(&mut self, direction: IVec2) {
@@ -1154,6 +1349,7 @@ impl EventHandler for Game {
 						tile_rect(coords),
 						1,
 						Color::WHITE,
+						0.0,
 						&mut canvas,
 						&self.spritesheet,
 					);
@@ -1163,6 +1359,7 @@ impl EventHandler for Game {
 						tile_rect(coords),
 						1,
 						Color::WHITE,
+						0.0,
 						&mut canvas,
 						&self.spritesheet,
 					);
@@ -1179,10 +1376,23 @@ impl EventHandler for Game {
 							tile_rect(coords),
 							2,
 							Color::WHITE,
+							0.0,
 							&mut canvas,
 							&self.spritesheet,
 						);
 					}
+				}
+
+				if let Some(exit) = &self.grid.get(Point2::from([grid_x, grid_y])).unwrap().exit {
+					draw_sprite(
+						Sprite::Arrow,
+						tile_rect(coords),
+						2,
+						Color::new(0.8, 0.8, 0.8, 1.0),
+						0.0,
+						&mut canvas,
+						&self.spritesheet,
+					);
 				}
 
 				if let Some(obj) = &self.grid.get(Point2::from([grid_x, grid_y])).unwrap().obj {
@@ -1217,7 +1427,7 @@ impl EventHandler for Game {
 							Rect::new(window_x, window_y, dst_rect.w, dst_rect.h)
 						},
 					};
-					draw_sprite(sprite, rect, 3, color, &mut canvas, &self.spritesheet);
+					draw_sprite(sprite, rect, 3, color, 0.0, &mut canvas, &self.spritesheet);
 
 					// TurnInto rayguns display what they turn their targets into on them.
 					// This is kinda recursive is they can turn targets into TurnInto guns etc.
@@ -1225,25 +1435,57 @@ impl EventHandler for Game {
 						let size = 4.0 * 8.0;
 						let sub_rect = Rect::new(rect.right() - size, rect.bottom() - size, size, size);
 						let (sprite, color) = into_what.sprite_and_color();
-						draw_sprite(sprite, sub_rect, 4, color, &mut canvas, &self.spritesheet);
+						draw_sprite(
+							sprite,
+							sub_rect,
+							4,
+							color,
+							0.0,
+							&mut canvas,
+							&self.spritesheet,
+						);
 						if let ObjKind::Raygun(RaygunKind::TurnInto(into_what)) = &**into_what {
 							let size = 2.0 * 8.0;
 							let sub_rect =
 								Rect::new(rect.right() - size, rect.bottom() - size, size, size);
 							let (sprite, color) = into_what.sprite_and_color();
-							draw_sprite(sprite, sub_rect, 5, color, &mut canvas, &self.spritesheet);
+							draw_sprite(
+								sprite,
+								sub_rect,
+								5,
+								color,
+								0.0,
+								&mut canvas,
+								&self.spritesheet,
+							);
 							if let ObjKind::Raygun(RaygunKind::TurnInto(into_what)) = &**into_what {
 								let size = 1.0 * 8.0;
 								let sub_rect =
 									Rect::new(rect.right() - size, rect.bottom() - size, size, size);
 								let (sprite, color) = into_what.sprite_and_color();
-								draw_sprite(sprite, sub_rect, 6, color, &mut canvas, &self.spritesheet);
+								draw_sprite(
+									sprite,
+									sub_rect,
+									6,
+									color,
+									0.0,
+									&mut canvas,
+									&self.spritesheet,
+								);
 								if let ObjKind::Raygun(RaygunKind::TurnInto(into_what)) = &**into_what {
 									let size = 0.5 * 8.0;
 									let sub_rect =
 										Rect::new(rect.right() - size, rect.bottom() - size, size, size);
 									let (sprite, color) = into_what.sprite_and_color();
-									draw_sprite(sprite, sub_rect, 7, color, &mut canvas, &self.spritesheet);
+									draw_sprite(
+										sprite,
+										sub_rect,
+										7,
+										color,
+										0.0,
+										&mut canvas,
+										&self.spritesheet,
+									);
 								}
 							}
 						}

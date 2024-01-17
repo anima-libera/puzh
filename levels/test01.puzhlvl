@@ -1,9 +1,10 @@
 name test uwu :3
+id test01
 grid
 # # # # # # # # # # # #
 # # # # # # # # # # # #
 # #     #     #     # #
-p       #     #        
+@       #     #       %
 # #     #     #     # #
 # #     # r   # # # # #
 # #     #     #     # #
@@ -12,6 +13,8 @@ p       #     #
 # #     #   g #     # #
 # # # # # # # # # # # #
 # # # # # # # # # # # #
+entry @ right
+exit % right test02
 
 obj space none
 obj # wall

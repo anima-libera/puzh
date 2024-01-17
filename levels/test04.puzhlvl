@@ -1,9 +1,10 @@
 name can u get the cheese?
+id test04
 grid
 # # # # # # # # # # # #
 # # # # # # # # # # # #
 # #         o       m #
-p           o          
+@           o         %
 # #         o       m #
 # #         o       m #
 # # G       o   c   m #
@@ -12,6 +13,8 @@ p           o
 # #         o       m #
 # # # # # # # # # # # #
 # # # # # # # # # # # #
+entry @ right
+exit % right test05
 
 obj space none
 obj # wall

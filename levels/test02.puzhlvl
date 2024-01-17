@@ -1,9 +1,10 @@
 name when the
+id test02
 grid
 # # # # # # # # # # # #
 # # # # # # # # # # # #
 # #             # # # #
-p               # # #  
+@               # # # %
 # #     g       # # # #
 # #             # # # #
 # #             # # # #
@@ -12,6 +13,8 @@ p               # # #
 # #             # # # #
 # # # # # # # # # # # #
 # # # # # # # # # # # #
+entry @ right
+exit % right test03
 
 obj space none
 obj # wall

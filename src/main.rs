@@ -11,6 +11,8 @@ use ggez::mint::Point2;
 use ggez::winit::event::VirtualKeyCode;
 use ggez::{Context, ContextBuilder, GameResult};
 
+use clap::Parser;
+
 fn tile_rect(coords: Point2<i32>) -> Rect {
 	Rect::new(
 		coords.x as f32 * Tile::W,
@@ -370,6 +372,8 @@ impl Level {
 		grid.get_mut(Point2::from([8, 4])).unwrap().ground = Ground::Ice;
 		grid.get_mut(Point2::from([7, 5])).unwrap().ground = Ground::Ice;
 		grid.get_mut(Point2::from([8, 5])).unwrap().ground = Ground::Ice;
+		grid.get_mut(Point2::from([11, 5])).unwrap().exit =
+			Some(Exit { direction: (1, 0).into(), dst_level_id: "test01".into() });
 
 		let notes = vec![Note {
 			coords: Point2::from([2, 4]),
@@ -385,7 +389,7 @@ impl Level {
 			error_messages: vec![],
 			notes,
 			entry_coords: [3, 5].into(),
-			entry_direction: (0, -1).into(),
+			entry_direction: (0, 1).into(),
 		}
 	}
 
@@ -808,8 +812,16 @@ struct Game {
 	reset_count: u32,
 }
 
+#[derive(Parser)]
+#[command(color = clap::ColorChoice::Auto)]
+struct CommandLineSettings {
+	#[arg(long = "level", short = 'l', value_name = "LEVEL_ID")]
+	level_id: Option<String>,
+}
+
 impl Game {
 	pub fn new(ctx: &mut Context) -> GameResult<Game> {
+		let settings = CommandLineSettings::parse();
 		let mut all_levels = HashMap::new();
 		let test_level = Level::test();
 		all_levels.insert(test_level.id.clone(), test_level);
@@ -820,7 +832,7 @@ impl Game {
 			let level_id = level.id.clone();
 			all_levels.insert(level_id, level);
 		}
-		let level_id = "test01";
+		let level_id = settings.level_id.as_deref().unwrap_or("test");
 		let level = all_levels.get(level_id).unwrap().clone();
 		let grid = level.grid.clone();
 		let notes = level.notes.clone();
@@ -1063,6 +1075,7 @@ impl Game {
 		self.level = new_level;
 		self.grid = self.level.grid.clone();
 		self.rays = vec![];
+		self.notes = self.level.notes.clone();
 		let entry_coords = self.level.entry_coords;
 		let entry_direction = self.level.entry_direction;
 		self.grid.get_mut(entry_coords).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
@@ -1287,6 +1300,21 @@ impl EventHandler for Game {
 				self.cheese_count_got_here = 0;
 				self.step_count = self.step_count_at_level_start;
 				self.reset_count += 1;
+				let entry_coords = self.level.entry_coords;
+				let entry_direction = self.level.entry_direction;
+				self.grid.get_mut(entry_coords).unwrap().obj = Some(Obj::from_kind(ObjKind::Player));
+				self
+					.grid
+					.get_mut(entry_coords)
+					.unwrap()
+					.obj
+					.as_mut()
+					.unwrap()
+					.animation = Animation::CommingFrom {
+					src: (IVec2::from(entry_coords) - entry_direction).into(),
+					time_start: Instant::now(),
+					duration: Duration::from_secs_f32(0.05),
+				};
 			},
 			Some(VirtualKeyCode::Up) if can_play => self.player_move(IVec2::from([0, -1])),
 			Some(VirtualKeyCode::Down) if can_play => self.player_move(IVec2::from([0, 1])),

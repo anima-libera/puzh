@@ -1,0 +1,21 @@
+name h
+id test07
+grid
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+# #         # #     # #
+@           # #       %
+# #     g   # #     # #
+# #         # #     # #
+# #         # # # # # #
+# #         # #     # #
+# #         # #       #
+# #         # #     # #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+entry @ right
+exit % right test08
+
+obj space none
+obj # wall
+obj g raygun:turn_into_turn_into

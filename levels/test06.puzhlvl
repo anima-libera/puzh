@@ -14,7 +14,7 @@ grid
 #     # k         # # #
 # # # # # # # # # # # #
 entry @ right
-exit % right test
+exit % right test07
 
 note 7 5 15.0 back ; ; ; ; keys ^^
 note 1 8 15.0 front ; ; ; ;how cheese

@@ -1,0 +1,28 @@
+name uwu
+id test09
+grid
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+# #         , & & & # #
+@     & ,   & , &     %
+# # , & &   & & & & # #
+# #   , &   , & & & # #
+# #       a   & & & # #
+# # , & g & & & & & # #
+# # , & & & & & & & # #
+# #   , ,   , & & & # #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+entry @ right
+exit % right test
+
+obj space none
+obj # wall
+obj g raygun:duplicate
+obj G raygun:turn_into_turn_into
+obj 0 rock
+obj & tree
+obj a axe
+obj c cheese
+ground , sapling
+

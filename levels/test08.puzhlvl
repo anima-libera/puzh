@@ -1,0 +1,29 @@
+name uwu
+id test08
+grid
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+# #         #       # #
+@ .         #       . %
+# #     0           # #
+# #   0           # # #
+# #       G         # #
+# #                 # #
+# #         #       # #
+# #         #       # #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+entry @ right
+exit % right test09
+
+obj space none
+obj # wall
+obj g raygun:turn_into:rock
+obj G raygun:turn_into:rope
+obj 0 rock
+
+ground space ice
+ground . grass
+ground 0 ice
+ground g ice
+ground G ice

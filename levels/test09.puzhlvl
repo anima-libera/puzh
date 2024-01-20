@@ -14,7 +14,7 @@ grid
 # # # # # # # # # # # #
 # # # # # # # # # # # #
 entry @ right
-exit % right test
+exit % right test10
 
 obj space none
 obj # wall

@@ -1,0 +1,24 @@
+name the
+id test10
+grid
+# # # # # # # # # # # #
+# #       # # # # # # #
+# #   # r #   # # # # #
+@               d     %
+# #   #   #   # # # # #
+# #   #   #   # # # # #
+# #       #   # # # # #
+# #         k # # # # #
+# # # # 0 # # # # # # #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+# # # # # # # # # # # #
+entry @ right
+exit % right test
+
+obj space none
+obj # wall
+obj 0 rock
+obj r rope
+obj k key
+obj d door
